@@ -7,8 +7,12 @@ RSS-джерела та логіка отримання вакансій.
 
 import logging
 import re as _re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
 from urllib.parse import quote
 
 import hashlib
@@ -21,6 +25,15 @@ logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 15
 GREEN, RESET = "\033[32m", "\033[0m"
+
+# Детальне логування RSS-запитів/парсингу/дедуплікації в консоль (включно з повним
+# дампом сирого RSS XML на кожен фід) — вмикай тільки для дебагу, бо на кожен
+# запит користувача це друкує в консоль десятки-сотні рядків і сповільнює відповідь.
+DEBUG = False
+
+def _dprint(*args, **kwargs) -> None:
+    if DEBUG:
+        print(*args, **kwargs)
 
 HEADERS = {
     "User-Agent": (
@@ -71,6 +84,17 @@ def make_vacancy_hash(title: str, company: str) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
+def make_link_hash(link: str) -> str:
+    """SHA-256 хеш ПОВНОГО посилання, обрізаний до 16 hex — стабільний короткий ID
+    вакансії для callback_data (ліміт Telegram — 64 байти на callback_data).
+
+    НЕ можна просто брати link[:50]: URL різних вакансій одного сайту часто
+    збігаються в перших ~50 символах (спільний префікс компанії), а числовий ID
+    вакансії йде вже ПІСЛЯ 50-го символу — тобто різні вакансії буквально
+    зливались в один "short_link" і приховування однієї ховало й іншу."""
+    return hashlib.sha256(link.encode("utf-8")).hexdigest()[:16]
+
+
 @dataclass
 class Vacancy:
     source: str
@@ -82,6 +106,7 @@ class Vacancy:
     location: str = ""
     salary: str = ""
     vacancy_hash: str = ""  # заповнюється після парсингу
+    category: str = ""      # напр. "Java" — заповнюється в fetch_all_vacancies після злиття
 
 
 @dataclass
@@ -448,6 +473,27 @@ def _parse_date(entry) -> datetime | None:
         return None
 
 
+def vacancy_sort_date(v: "Vacancy"):
+    """Дата публікації для сортування списку (найстаріші — на початок).
+    Пріоритет: pub_dt, потім парсинг published-рядка (dd.mm.yyyy або RFC 2822).
+    Повертає None, якщо дату визначити не вдалося — такі вакансії сортуються в кінець."""
+    if v.pub_dt is not None:
+        try:
+            return v.pub_dt.date()
+        except Exception:
+            pass
+    pub = v.published
+    if pub and pub != "невідомо":
+        try:
+            return datetime.strptime(pub, "%d.%m.%Y").date()
+        except ValueError:
+            try:
+                return parsedate_to_datetime(pub).date()
+            except Exception:
+                pass
+    return None
+
+
 # Патерн для латинських слів (назва компанії)
 _LATIN_RE = _re.compile(r'[A-Za-z]')
 
@@ -567,11 +613,11 @@ def _fetch_feed(source_name: str, url: str) -> list[Vacancy]:
         response.raise_for_status()
     except requests.RequestException as exc:
         logger.warning("Помилка завантаження %s: %s", source_name, exc)
-        print(f"{GREEN}[{source_name}] ❌ ПОМИЛКА: {exc}{RESET}")
+        _dprint(f"{GREEN}[{source_name}] ❌ ПОМИЛКА: {exc}{RESET}")
         return []
 
     raw_text = response.content.decode("utf-8", errors="replace")
-    print(
+    _dprint(
         f"{GREEN}\n{'='*70}\n"
         f"[{source_name}] HTTP: {response.status_code} | "
         f"Розмір: {len(response.content)} байт\n"
@@ -592,8 +638,8 @@ def _fetch_feed(source_name: str, url: str) -> list[Vacancy]:
             company = _extract_company(entry, title, source_name)
             if not company:
                 raw_desc = getattr(entry, "summary", None) or getattr(entry, "description", "")
-                print(f"{GREEN}  [NO COMPANY] title={title!r}")
-                print(f"    description raw (перші 300): {repr(raw_desc[:300])}{RESET}")
+                _dprint(f"{GREEN}  [NO COMPANY] title={title!r}")
+                _dprint(f"    description raw (перші 300): {repr(raw_desc[:300])}{RESET}")
 
         location = loc_from_title or _extract_location(entry, source_name)
         published = dt.strftime("%d.%m.%Y") if dt else (getattr(entry, "published", "") or "невідомо")
@@ -610,14 +656,14 @@ def _fetch_feed(source_name: str, url: str) -> list[Vacancy]:
             vacancy_hash=make_vacancy_hash(title, company),
         ))
 
-    print(f"{GREEN}[{source_name}] Записів у RSS: {len(parsed.entries)} | Завантажено: {len(vacancies)}{RESET}")
+    _dprint(f"{GREEN}[{source_name}] Записів у RSS: {len(parsed.entries)} | Завантажено: {len(vacancies)}{RESET}")
     if parsed.entries:
         e0 = parsed.entries[0]
         company_fields = {f: getattr(e0, f, None) for f in ("author", "dc_creator", "itunes_author")}
-        print(f"{GREEN}  Всі title ({len(parsed.entries)}):{RESET}")
+        _dprint(f"{GREEN}  Всі title ({len(parsed.entries)}):{RESET}")
         for e in parsed.entries:
-            print(f"{GREEN}    → {getattr(e, 'title', '???')}{RESET}")
-        print(f"{GREEN}  Поля компанії 1-го запису: {company_fields}{RESET}")
+            _dprint(f"{GREEN}    → {getattr(e, 'title', '???')}{RESET}")
+        _dprint(f"{GREEN}  Поля компанії 1-го запису: {company_fields}{RESET}")
 
     return vacancies
 
@@ -649,70 +695,78 @@ def _passes_date(v: Vacancy, cutoff) -> bool:
         pub = v.published
         if pub and pub != "невідомо":
             try:
-                from datetime import datetime as _dt
-                vdate = _dt.strptime(pub, "%d.%m.%Y").date()
+                vdate = datetime.strptime(pub, "%d.%m.%Y").date()
             except ValueError:
                 try:
-                    from email.utils import parsedate_to_datetime as _ptd
-                    vdate = _ptd(pub).date()
+                    vdate = parsedate_to_datetime(pub).date()
                 except Exception:
                     pass
 
     if vdate is None:
-        print(f"{GREEN}  [DATE] SKIP (невідома дата): {v.title!r}{RESET}")
+        _dprint(f"{GREEN}  [DATE] SKIP (невідома дата): {v.title!r}{RESET}")
         return True
 
     passes = vdate >= cutoff
     if not passes:
-        print(f"{GREEN}  [DATE] ВІДФІЛЬТРОВАНО {vdate} < {cutoff}: {v.title!r}{RESET}")
+        _dprint(f"{GREEN}  [DATE] ВІДФІЛЬТРОВАНО {vdate} < {cutoff}: {v.title!r}{RESET}")
     return passes
 
 
-def _fetch_raw(days: int | None = None, categories: list[str] | None = None) -> tuple[dict[str, list[Vacancy]], dict[str, int]]:
-    """Завантажує всі джерела. Повертає (raw, dups_per_source)."""
+def _fetch_raw(categories: list[str] | None = None) -> tuple[dict[str, list[Vacancy]], dict[str, int]]:
+    """Завантажує всі джерела ПАРАЛЕЛЬНО (кожен фід — окремий мережевий запит,
+    тож послідовно вони можуть коштувати до REQUEST_TIMEOUT секунд кожен).
+    Без фільтру по даті — той самий "всечасовий" знімок далі ділять між собою
+    всі часові вікна (1 день / 7 днів / весь час), див. fetch_all_vacancies.
+    Повертає (raw, dups_per_source)."""
     raw_feeds = build_feeds_for_categories(categories or AVAILABLE_CATEGORIES)
-    cutoff = _date_cutoff(days)
-    cutoff_str = cutoff.strftime("%d.%m.%Y") if cutoff else "без обмежень"
+
+    fetch_jobs = [(name, url) for name, urls in raw_feeds.items() for url in urls]
+    fetched: dict[str, list[Vacancy]] = {name: [] for name in raw_feeds}
+
+    if fetch_jobs:
+        with ThreadPoolExecutor(max_workers=len(fetch_jobs)) as executor:
+            future_to_name = {
+                executor.submit(_fetch_feed, name, url): name
+                for name, url in fetch_jobs
+            }
+            for future in as_completed(future_to_name):
+                name = future_to_name[future]
+                fetched[name].extend(future.result())
 
     raw: dict[str, list[Vacancy]] = {}
     dups_per_source: dict[str, int] = {}
 
-    for source_name, urls in raw_feeds.items():
+    for source_name, entries in fetched.items():
         seen_full: set[tuple[str, str]] = set()
+        seen_full_titles: set[str] = set()  # титули з seen_full — для O(1) look-up
         seen_title: set[str] = set()
         vacancies: list[Vacancy] = []
-        filtered_out = 0
         inner_dups = 0
 
-        for url in urls:
-            for v in _fetch_feed(source_name, url):
-                if not _passes_date(v, cutoff):
-                    filtered_out += 1
-                    continue
-                t = v.title.strip().lower()
-                c = v.company.strip().lower()
-                if not t:
+        for v in entries:
+            t = v.title.strip().lower()
+            c = v.company.strip().lower()
+            if not t:
+                vacancies.append(v)
+                continue
+            if c:
+                if (t, c) not in seen_full:
+                    seen_full.add((t, c))
+                    seen_full_titles.add(t)
                     vacancies.append(v)
-                    continue
-                if c:
-                    if (t, c) not in seen_full:
-                        seen_full.add((t, c))
-                        vacancies.append(v)
-                    else:
-                        inner_dups += 1
                 else:
-                    if t not in seen_title and not any(t == k[0] for k in seen_full):
-                        seen_title.add(t)
-                        vacancies.append(v)
-                    else:
-                        inner_dups += 1
+                    inner_dups += 1
+            else:
+                if t not in seen_title and t not in seen_full_titles:
+                    seen_title.add(t)
+                    vacancies.append(v)
+                else:
+                    inner_dups += 1
 
-        print(
+        _dprint(
             f"{GREEN}[FILTER] {source_name}: "
             f"{len(vacancies)} вак. | "
-            f"дата відфільтровано: {filtered_out} | "
-            f"дублікатів всередині: {inner_dups} "
-            f"(cutoff: {cutoff_str}){RESET}"
+            f"дублікатів всередині: {inner_dups}{RESET}"
         )
         raw[source_name] = vacancies
         dups_per_source[source_name] = inner_dups
@@ -723,11 +777,11 @@ def _fetch_raw(days: int | None = None, categories: list[str] | None = None) -> 
 # ── Логування ─────────────────────────────────────────────────────────────────
 
 def _log_list(name: str, vacancies: list[Vacancy]) -> None:
-    print(f"{GREEN}\n{'─'*60}\n📋 {name} ({len(vacancies)} вак.):{RESET}")
+    _dprint(f"{GREEN}\n{'─'*60}\n📋 {name} ({len(vacancies)} вак.):{RESET}")
     for i, v in enumerate(vacancies, 1):
-        print(f"{GREEN}  {i:2}. title={v.title!r}, company={v.company!r}{RESET}")
+        _dprint(f"{GREEN}  {i:2}. title={v.title!r}, company={v.company!r}{RESET}")
     if not vacancies:
-        print(f"{GREEN}  (порожній){RESET}")
+        _dprint(f"{GREEN}  (порожній){RESET}")
 
 
 # ── Злиття з дедуплікацією ────────────────────────────────────────────────────
@@ -746,6 +800,7 @@ def _merge(name: str, primary: list[Vacancy], secondary: list[Vacancy]) -> tuple
     """
     # Будуємо seen з primary
     seen_full: set[tuple[str, str]] = set()   # (title, company) де company не порожній
+    seen_full_titles: set[str] = set()          # титули з seen_full — для O(1) look-up
     seen_title: set[str] = set()               # тільки title де company порожній
 
     for v in primary:
@@ -753,13 +808,14 @@ def _merge(name: str, primary: list[Vacancy], secondary: list[Vacancy]) -> tuple
         c = v.company.strip().lower()
         if t and c:
             seen_full.add((t, c))
+            seen_full_titles.add(t)
         elif t:
             seen_title.add(t)
 
     unique_secondary: list[Vacancy] = []
     duplicates = 0
 
-    print(f"{GREEN}\n[MERGE → {name}] primary={len(primary)}, secondary={len(secondary)}{RESET}")
+    _dprint(f"{GREEN}\n[MERGE → {name}] primary={len(primary)}, secondary={len(secondary)}{RESET}")
     for v in secondary:
         t = v.title.strip().lower()
         c = v.company.strip().lower()
@@ -776,42 +832,92 @@ def _merge(name: str, primary: list[Vacancy], secondary: list[Vacancy]) -> tuple
                 is_dup = True
             else:
                 seen_full.add((t, c))
+                seen_full_titles.add(t)
         else:
             # company порожній — порівнюємо тільки по title
-            if t in seen_title or any(t == k[0] for k in seen_full):
+            if t in seen_title or t in seen_full_titles:
                 is_dup = True
             else:
                 seen_title.add(t)
 
         if is_dup:
-            print(f"{GREEN}  ✂ ДУБЛІКАТ: title={v.title!r}, company={v.company!r}{RESET}")
+            _dprint(f"{GREEN}  ✂ ДУБЛІКАТ: title={v.title!r}, company={v.company!r}{RESET}")
             duplicates += 1
         else:
             unique_secondary.append(v)
 
     combined = primary + unique_secondary
-    print(f"{GREEN}  ✅ {len(combined)} вак. (видалено {duplicates}){RESET}")
+    _dprint(f"{GREEN}  ✅ {len(combined)} вак. (видалено {duplicates}){RESET}")
     return combined, duplicates
 
 
 # ── Публічний API ─────────────────────────────────────────────────────────────
+# ── Кеш результатів фетчу ─────────────────────────────────────────────────────
+# Клік по кнопці меню ("Всі вакансії" тощо) раніше завжди означав повний ре-фетч
+# усіх RSS-джерел з нуля. TTL-кеш дозволяє повторним запитам (той самий набір
+# категорій + період) у межах CACHE_TTL_SECONDS віддавати вже готовий результат.
+CACHE_TTL_SECONDS = 120
+_cache_lock = threading.Lock()
+_vacancies_cache: dict[tuple, tuple[float, list["MergedSource"]]] = {}
+
+
+def _clone_merged_sources(sources: list[MergedSource]) -> list[MergedSource]:
+    """Копія списку MergedSource з новими списками vacancies — виклики нижче за
+    течією (bot.py) фільтрують ms.vacancies по-своєму (напр. прибирають приховані),
+    тож зі спільного кешу треба віддавати незалежні списки, а не той самий об'єкт."""
+    return [
+        MergedSource(name=ms.name, vacancies=list(ms.vacancies),
+                     total_before=ms.total_before, duplicates=ms.duplicates)
+        for ms in sources
+    ]
+
+
+def _apply_date_filter(sources: list[MergedSource], days: int | None) -> list[MergedSource]:
+    """Застосовує фільтр по даті ПІСЛЯ фетчу/злиття — так "1 день", "7 днів" і
+    "весь час" завжди рахуються з ОДНОГО спільного знімка фіду (кеш нижче не
+    залежить від days), а не з окремих живих запитів, зроблених у різний момент —
+    інакше вони можуть розходитись, якщо стрічка змінилась між запитами."""
+    if days is None:
+        return sources
+    cutoff = _date_cutoff(days)
+    for ms in sources:
+        ms.vacancies = [v for v in ms.vacancies if _passes_date(v, cutoff)]
+    return sources
+
 
 def fetch_all_vacancies(days: int | None = None, categories: list[str] | None = None) -> list[MergedSource]:
-    """
-    Двоетапне злиття для обраних категорій.
-    Кожна категорія → 4 джерела → 1 MergedSource у фіналі.
-    """
+    """Двоетапне злиття для обраних категорій (з TTL-кешем, див. CACHE_TTL_SECONDS).
+    Кеш і сам фетч — БЕЗ фільтру по даті; дата застосовується окремо на льоту,
+    щоб усі часові вікна ділили один і той самий знімок фіду."""
     active_cats = categories or AVAILABLE_CATEGORIES
-    raw, dups_per_source = _fetch_raw(days=days, categories=active_cats)
+    cache_key = tuple(sorted(active_cats))
 
-    print(f"{GREEN}\n{'='*60}\nЕТАП 0: Сирі дані\n{'='*60}{RESET}")
+    with _cache_lock:
+        cached = _vacancies_cache.get(cache_key)
+        if cached and (time.monotonic() - cached[0]) < CACHE_TTL_SECONDS:
+            merged_sources = cached[1]
+        else:
+            merged_sources = None
+
+    if merged_sources is None:
+        merged_sources = _fetch_all_vacancies_uncached(active_cats)
+        with _cache_lock:
+            _vacancies_cache[cache_key] = (time.monotonic(), merged_sources)
+
+    return _apply_date_filter(_clone_merged_sources(merged_sources), days)
+
+
+def _fetch_all_vacancies_uncached(active_cats: list[str]) -> list[MergedSource]:
+    raw, dups_per_source = _fetch_raw(categories=active_cats)
+
+    _dprint(f"{GREEN}\n{'='*60}\nЕТАП 0: Сирі дані\n{'='*60}{RESET}")
     for name, vacancies in raw.items():
         _log_list(name, vacancies)
 
     merged_sources: list[MergedSource] = []
 
     for cat in active_cats:
-        print(f"{GREEN}\n{'='*60}\nЗЛИТТЯ: {cat}\n{'='*60}{RESET}")
+        _dprint(f"{GREEN}\n{'='*60}\nЗЛИТТЯ: {cat}\n{'='*60}{RESET}")
 
         temp_djinni, djinni_stage1_dups = _merge(f"Temp Djinni {cat}",
             raw.get(f"Deftech Djinni {cat}", []),
@@ -825,6 +931,8 @@ def fetch_all_vacancies(days: int | None = None, categories: list[str] | None = 
 
         # Етап 2: DOU primary (пріоритет), Djinni secondary — дублікати видаляються з Djinni
         final, merge_dups = _merge(f"Final {cat}", temp_dou, temp_djinni)
+        for v in final:
+            v.category = cat
         _log_list(f"Final {cat}", final)
 
         # Загальна кількість дублікатів = всередині джерел (fetch_raw) +

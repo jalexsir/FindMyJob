@@ -3,11 +3,12 @@ Telegram-бот: перегляд вакансій з Hide/Unhide та очищ�
 HIDDEN_VACANCIES зберігається в bot_data["hidden_{user_id}"] — per-user.
 """
 
+import asyncio
 import html
 import logging
 import os
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 
 from dotenv import load_dotenv
 from telegram import (
@@ -20,8 +21,12 @@ from telegram.ext import (
     ContextTypes, MessageHandler, filters,
 )
 
-from feeds import fetch_all_vacancies, make_vacancy_hash, MergedSource, Vacancy, AVAILABLE_CATEGORIES
+from feeds import (
+    fetch_all_vacancies, make_vacancy_hash, make_link_hash, vacancy_sort_date,
+    MergedSource, Vacancy, AVAILABLE_CATEGORIES,
+)
 from image_gen import generate_vacancy_image
+import storage
 
 load_dotenv()
 
@@ -32,14 +37,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-MAX_PER_SOURCE = 20
+MAX_PER_SOURCE = 100
 
 # ── Callback-константи ────────────────────────────────────────────────────────
 CB_VAC_1D        = "vacancies_1d"
 CB_VAC_14D       = "vacancies_14d"
 CB_CONFIRM_YES   = "confirm_yes:"
 CB_CONFIRM_NO    = "confirm_no"
-CB_SHOW_HIDDEN   = "show_hidden"
+CB_SHOW_HIDDEN   = "show_hidden"          # фінальний крок — власне показ списку карток
+CB_SHOW_HIDDEN_PROMPT = "show_hidden_prompt"  # проміжний крок — тільки кількість + підтвердження
 CB_CLEAR         = "clear_history"
 CB_CLEAR_HIDE    = "clear_hidden"
 CB_HIDE          = "hide:"
@@ -72,11 +78,13 @@ ALL_BTN_TEXTS = [BTN_VAC_1D, BTN_VAC_14D, BTN_VAC_ALL, BTN_SHOW_HIDDEN, BTN_FAVO
 def _hidden_key(update: Update) -> str:
     return f"hidden_{update.effective_user.id}"
 
-def get_hidden(context: ContextTypes.DEFAULT_TYPE, update: Update) -> dict[str, str]:
+def get_hidden(context: ContextTypes.DEFAULT_TYPE, update: Update) -> dict[str, dict]:
+    """{short_link: {"title": ..., ...повні поля Vacancy, якщо є в кеші}}."""
     return context.bot_data.setdefault(_hidden_key(update), {})
 
 def set_hidden(context: ContextTypes.DEFAULT_TYPE, update: Update, data: dict) -> None:
     context.bot_data[_hidden_key(update)] = data
+    storage.replace_hidden(update.effective_user.id, data)
 
 
 # ── Per-user сховище FAVORITES ────────────────────────────────────────────────
@@ -90,6 +98,18 @@ def get_favorites(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> dict[str,
 
 def set_favorites(context: ContextTypes.DEFAULT_TYPE, user_id: int, data: dict) -> None:
     context.bot_data[_fav_key(user_id)] = data
+    storage.replace_favorites(user_id, data)
+
+
+# ── Per-user кеш повних даних показаних вакансій ─────────────────────────────
+# Заповнюється в _send_vacancies. Дозволяє hide/favorite/restore працювати з
+# уже наявними даними, без повторного фетчу RSS (fetch_all_vacancies).
+
+def _vcache_key(user_id: int) -> str:
+    return f"vcache_{user_id}"
+
+def get_vacancy_cache(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> dict[str, dict]:
+    return context.bot_data.setdefault(_vcache_key(user_id), {})
 
 
 # ── Per-user seen-хеші (пам'ять переглянутих вакансій) ───────────────────────
@@ -168,7 +188,7 @@ def build_persistent_keyboard() -> ReplyKeyboardMarkup:
     )
 
 def build_vacancy_keyboard(vacancy: Vacancy, is_favorite: bool = False) -> InlineKeyboardMarkup:
-    short_link = vacancy.link[:50]
+    short_link = make_link_hash(vacancy.link)
     fav_btn = InlineKeyboardButton(
         "💛 В обраному" if is_favorite else "⭐ В обране",
         callback_data=f"{CB_UNFAVORITE}{short_link}" if is_favorite else f"{CB_FAVORITE}{short_link}",
@@ -180,16 +200,31 @@ def build_vacancy_keyboard(vacancy: Vacancy, is_favorite: bool = False) -> Inlin
 
 def build_restore_keyboard(short_link: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("♻️ Відновити вакансію", callback_data=f"{CB_RESTORE}{short_link}")],
+        [InlineKeyboardButton("👁 Відновити до перегляду", callback_data=f"{CB_RESTORE}{short_link}")],
+    ])
+
+def build_show_hidden_prompt_keyboard() -> InlineKeyboardMarkup:
+    """Кнопка підтвердження показу списку вилучених (CB_SHOW_HIDDEN → show_hidden_list
+    → _show_hidden). Використовується в _show_hidden_prompt."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔍 Показати вилучені вакансії", callback_data=CB_SHOW_HIDDEN)],
+    ])
+
+def build_no_vacancies_keyboard() -> InlineKeyboardMarkup:
+    """Клавіатура для "нічого не знайдено": глянути вилучені (спочатку кількість +
+    підтвердження, CB_SHOW_HIDDEN_PROMPT) АБО переобрати категорії."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔍 Показати вилучені вакансії", callback_data=CB_SHOW_HIDDEN_PROMPT)],
+        [InlineKeyboardButton("🔄 Переобрати категорії пошуку", callback_data=CB_RESELECT_CATS)],
     ])
 
 def build_favorite_vacancy_keyboard(vacancy: Vacancy) -> InlineKeyboardMarkup:
     """Клавіатура для вакансії зі списку Обраних — з кнопкою видалення."""
-    short_link = vacancy.link[:50]
+    short_link = make_link_hash(vacancy.link)
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔗 Відкрити вакансію", url=vacancy.link)],
-        [InlineKeyboardButton("🗑 Видалити з обраних", callback_data=f"{CB_FAV_DELETE}{short_link}")],
-        [InlineKeyboardButton("🚫 Вилучити з пошуку", callback_data=f"{CB_HIDE}{short_link}")],
+        [InlineKeyboardButton("💔 Прибрати з обраних", callback_data=f"{CB_FAV_DELETE}{short_link}")],
+        [InlineKeyboardButton("🙈 Не показувати", callback_data=f"{CB_HIDE}{short_link}")],
     ])
 
 
@@ -243,13 +278,58 @@ def format_vacancy(vacancy: Vacancy, num: int = 0) -> str:
     lines.append(f"🌐 <b>Сайт:</b> {html.escape(vacancy.source)}")
     return "\n".join(lines)
 
-def build_summary(sources: list[MergedSource], days: int | None) -> str:
-    total = sum(len(ms.vacancies) for ms in sources)
+def pluralize_ua(n: int, one: str, few: str, many: str) -> str:
+    """Обирає правильну форму слова за українськими правилами відмінювання числівників.
+
+    one  — для 1, 21, 31... (крім 11)
+    few  — для 2-4, 22-24, 32-34...
+    many — для 0, 5-20, 25-30...
+    """
+    n_abs = abs(n) % 100
+    if 11 <= n_abs <= 14:
+        return many
+    n10 = n_abs % 10
+    if n10 == 1:
+        return one
+    if 2 <= n10 <= 4:
+        return few
+    return many
+
+def vacancies_word(n: int) -> str:
+    return pluralize_ua(n, "вакансія", "вакансії", "вакансій")
+
+def duplicates_word(n: int) -> str:
+    return pluralize_ua(n, "дублікат", "дублікати", "дублікатів")
+
+def obrani_vacancies_phrase(n: int) -> str:
+    """'обрану вакансію' / 'обрані вакансії' / 'обраних вакансій'."""
+    return pluralize_ua(n, "обрану вакансію", "обрані вакансії", "обраних вакансій")
+
+def build_summary(sources: list[MergedSource], days: int | None, hidden_count: int = 0) -> str:
+    """`sources` — вакансії ПІСЛЯ вилучення прихованих (тобто ті, що доступні до перегляду).
+    `hidden_count` — скільки з поточної вибірки збігається зі списком вилучених.
+    """
+    available = sum(len(ms.vacancies) for ms in sources)
+    total_found = available + hidden_count
     period = f"за останні {days} д." if days else "за весь час"
-    lines = [f"🗂 <b>{period.capitalize()} знайдено {total} вакансій:</b>\n"]
+
+    header = f"{period.capitalize()} знайдено {total_found} {vacancies_word(total_found)}"
+    if hidden_count:
+        header += (
+            f", з них {hidden_count} в списку вилучених, "
+            f"до перегляду доступно {available} {vacancies_word(available)}"
+        )
+    lines = [f"🗂 <b>{header}:</b>\n"]
+
     for ms in sources:
-        dup = f" (видалено {ms.duplicates} дублікатів)" if ms.duplicates else ""
-        lines.append(f"  • {ms.name} — {len(ms.vacancies)} вак.{dup}")
+        n_vac = len(ms.vacancies)
+        if hidden_count:
+            # Коли є вилучені — не показуємо дублікати, щоб не перевантажувати зведення
+            lines.append(f"  • {ms.name} — {n_vac} {vacancies_word(n_vac)}")
+        else:
+            n_dup = ms.duplicates
+            dup = f" (видалено {n_dup} {duplicates_word(n_dup)})" if n_dup else ""
+            lines.append(f"  • {ms.name} — {n_vac} {vacancies_word(n_vac)}{dup}")
     return "\n".join(lines)
 
 
@@ -261,6 +341,7 @@ async def _send_vacancies(chat, pending: list[dict], context: ContextTypes.DEFAU
     """Надсилає список вакансій. Нові позначаються NEW, обрані — зіркою."""
     seen = get_seen(context, user_id)
     favorites = get_favorites(context, user_id)
+    vcache = get_vacancy_cache(context, user_id)
     ids = []
     new_hashes = []
 
@@ -268,9 +349,12 @@ async def _send_vacancies(chat, pending: list[dict], context: ContextTypes.DEFAU
         v = Vacancy(**vd)
         vh = v.vacancy_hash or make_vacancy_hash(v.title, v.company)
         is_new = vh not in seen
-        is_fav = force_favorite or (v.link[:50] in favorites)
+        is_fav = force_favorite or (make_link_hash(v.link) in favorites)
         if is_new:
             new_hashes.append(vh)
+
+        # Кешуємо повні дані вакансії — щоб hide/favorite/restore не тягли RSS заново
+        vcache[make_link_hash(v.link)] = vd
 
         image = generate_vacancy_image(v.title, i, is_new=is_new, is_favorite=is_fav)
         kb = build_favorite_vacancy_keyboard(v) if from_favorites else build_vacancy_keyboard(v, is_favorite=is_fav)
@@ -335,7 +419,7 @@ async def confirm_categories(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode=ParseMode.HTML,
     )
     msg = await query.message.chat.send_message(
-        "Натисни кнопку меню внизу щоб обрати дію.",
+        "Обери період доступних вакансій в меню",
         reply_markup=build_persistent_keyboard(),
     )
     track(context, msg.message_id)
@@ -356,7 +440,7 @@ async def handle_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif text == BTN_VAC_ALL:
         await _request_vacancies(update.message, context, days=None, user_id=update.effective_user.id)
     elif text == BTN_SHOW_HIDDEN:
-        await _show_hidden(update.message.chat, context, update)
+        await _show_hidden_prompt(update.message.chat, context, update)
     elif text == BTN_FAVORITES:
         await show_favorites_prompt(update.message.chat, context, update.effective_user.id)
     elif text == BTN_CLEAR:
@@ -377,24 +461,52 @@ async def _request_vacancies(message, context: ContextTypes.DEFAULT_TYPE, days: 
     track(context, wait_msg.message_id)
 
     user_cats = get_user_categories(context, user_id)
-    all_sources = fetch_all_vacancies(days=days, categories=user_cats or None)
+    all_sources = await asyncio.to_thread(fetch_all_vacancies, days=days, categories=user_cats or None)
     filtered = all_sources
-    hidden = context.bot_data.get(f"hidden_{message.chat.id}", {}) if hasattr(message, 'chat') else {}
+    hidden = context.bot_data.setdefault(f"hidden_{user_id}", {})
 
+    raw_total = sum(len(ms.vacancies) for ms in filtered)
+    # Рахуємо ЩО саме приховано (унікальні short_link), а не скільки разів вони
+    # трапилися в fetch — та сама вакансія може знайтися в кількох категоріях
+    # одночасно (категорії не дедуплікуються між собою), тож просте
+    # "raw_total - total" задвоювало б лічильник вилучених.
+    removed_links: set[str] = set()
+    hidden_changed = False
     for ms in filtered:
-        ms.vacancies = [v for v in ms.vacancies if v.link[:50] not in hidden]
+        for v in ms.vacancies:
+            sl = make_link_hash(v.link)
+            if sl in hidden:
+                removed_links.add(sl)
+                # Самозцілення: та сама вакансія могла бути прихована з іншої
+                # категорії раніше (категорії перетинаються) — тепер точно знаємо,
+                # що вона стосується і цієї категорії теж, тож запам'ятовуємо.
+                cats = hidden[sl].setdefault("categories", [])
+                if v.category and v.category not in cats:
+                    cats.append(v.category)
+                    hidden_changed = True
+        ms.vacancies = [v for v in ms.vacancies if make_link_hash(v.link) not in hidden][:MAX_PER_SOURCE]
+    if hidden_changed:
+        storage.replace_hidden(user_id, hidden)
 
     total = sum(len(ms.vacancies) for ms in filtered)
+    hidden_count = len(removed_links)
 
+    # Сортуємо по даті публікації: найстаріші зверху, найсвіжіші — останнім
+    # повідомленням (внизу списку). Ключ: (немає дати?, сама дата) — вакансії
+    # без визначеної дати йдуть в кінець, а не помилково потрапляють на початок.
+    sorted_vacancies = sorted(
+        (v for ms in filtered for v in ms.vacancies),
+        key=lambda v: (vacancy_sort_date(v) is None, vacancy_sort_date(v) or date.min),
+    )
     context.chat_data["pending_vacancies"] = [
         {"source": v.source, "title": v.title, "link": v.link,
          "published": v.published, "pub_dt": v.pub_dt,
          "company": v.company, "location": v.location, "salary": v.salary,
-         "vacancy_hash": v.vacancy_hash}
-        for ms in filtered for v in ms.vacancies[:MAX_PER_SOURCE]
+         "vacancy_hash": v.vacancy_hash, "category": v.category}
+        for v in sorted_vacancies  # вже обрізано до MAX_PER_SOURCE вище
     ]
 
-    summary = build_summary(filtered, days)
+    summary = build_summary(filtered, days, hidden_count=hidden_count)
 
     # Видаляємо "зачекай..." і відправляємо результат новим повідомленням
     try:
@@ -404,8 +516,9 @@ async def _request_vacancies(message, context: ContextTypes.DEFAULT_TYPE, days: 
 
     if total == 0:
         msg = await message.reply_text(
-            summary + "\n\nВакансій не знайдено (або всі приховані).",
+            summary,
             parse_mode=ParseMode.HTML,
+            reply_markup=build_no_vacancies_keyboard(),
         )
         track(context, msg.message_id)
         return
@@ -432,29 +545,59 @@ async def show_vacancies(update: Update, context: ContextTypes.DEFAULT_TYPE, day
     track(context, query.message.message_id)
     await query.edit_message_text("⏳ Завантажую вакансії, зачекай...")
 
-    user_cats = get_user_categories(context, update.effective_user.id if update.effective_user else 0)
-    all_sources = fetch_all_vacancies(days=days, categories=user_cats or None)
+    user_id = update.effective_user.id if update.effective_user else 0
+    user_cats = get_user_categories(context, user_id)
+    all_sources = await asyncio.to_thread(fetch_all_vacancies, days=days, categories=user_cats or None)
     filtered = all_sources
     hidden = get_hidden(context, update)
 
+    raw_total = sum(len(ms.vacancies) for ms in filtered)
+    # Рахуємо ЩО саме приховано (унікальні short_link), а не скільки разів вони
+    # трапилися в fetch — та сама вакансія може знайтися в кількох категоріях
+    # одночасно (категорії не дедуплікуються між собою), тож просте
+    # "raw_total - total" задвоювало б лічильник вилучених.
+    removed_links: set[str] = set()
+    hidden_changed = False
     for ms in filtered:
-        ms.vacancies = [v for v in ms.vacancies if v.link[:50] not in hidden]
+        for v in ms.vacancies:
+            sl = make_link_hash(v.link)
+            if sl in hidden:
+                removed_links.add(sl)
+                # Самозцілення: та сама вакансія могла бути прихована з іншої
+                # категорії раніше (категорії перетинаються) — тепер точно знаємо,
+                # що вона стосується і цієї категорії теж, тож запам'ятовуємо.
+                cats = hidden[sl].setdefault("categories", [])
+                if v.category and v.category not in cats:
+                    cats.append(v.category)
+                    hidden_changed = True
+        ms.vacancies = [v for v in ms.vacancies if make_link_hash(v.link) not in hidden][:MAX_PER_SOURCE]
+    if hidden_changed:
+        storage.replace_hidden(user_id, hidden)
 
     total = sum(len(ms.vacancies) for ms in filtered)
-    summary = build_summary(filtered, days)
+    hidden_count = len(removed_links)
+    summary = build_summary(filtered, days, hidden_count=hidden_count)
 
+    # Сортуємо по даті публікації: найстаріші зверху, найсвіжіші — останнім
+    # повідомленням (внизу списку). Ключ: (немає дати?, сама дата) — вакансії
+    # без визначеної дати йдуть в кінець, а не помилково потрапляють на початок.
+    sorted_vacancies = sorted(
+        (v for ms in filtered for v in ms.vacancies),
+        key=lambda v: (vacancy_sort_date(v) is None, vacancy_sort_date(v) or date.min),
+    )
     context.chat_data["pending_vacancies"] = [
         {"source": v.source, "title": v.title, "link": v.link,
          "published": v.published, "pub_dt": v.pub_dt,
          "company": v.company, "location": v.location, "salary": v.salary,
-         "vacancy_hash": v.vacancy_hash}
-        for ms in filtered for v in ms.vacancies[:MAX_PER_SOURCE]
+         "vacancy_hash": v.vacancy_hash, "category": v.category}
+        for v in sorted_vacancies  # вже обрізано до MAX_PER_SOURCE вище
     ]
 
     if total == 0:
         await query.edit_message_text(
-            summary + "\n\nВакансій не знайдено (або всі приховані).",
+            summary,
             parse_mode=ParseMode.HTML,
+            reply_markup=build_no_vacancies_keyboard(),
         )
         return
 
@@ -495,49 +638,35 @@ async def reselect_categories(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def confirm_show(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Крок 2: завантажує і виводить вакансії після підтвердження 'Так'."""
+    """Крок 2: показує вакансії, вже завантажені й збережені на кроці зведення
+    (без повторного фетчу RSS — pending_vacancies рахує _request_vacancies/show_vacancies)."""
     query = update.callback_query
     await query.answer()
     await query.edit_message_reply_markup(reply_markup=None)
 
-    # Витягуємо days з callback_data: "confirm_yes:1", "confirm_yes:7", "confirm_yes:all"
-    raw_days = query.data[len(CB_CONFIRM_YES):]
-    days: int | None = None if raw_days == "all" else int(raw_days)
-
     user_id = query.from_user.id
-    user_cats = get_user_categories(context, user_id)
-    hidden = get_hidden(context, update)
-
-    wait_msg = await query.message.reply_text("⏳ Завантажую вакансії, зачекай...")
-    track(context, wait_msg.message_id)
-
-    all_sources = fetch_all_vacancies(days=days, categories=user_cats or None)
-
-    for ms in all_sources:
-        ms.vacancies = [v for v in ms.vacancies if v.link[:50] not in hidden]
-
-    pending = [
-        {"source": v.source, "title": v.title, "link": v.link,
-         "published": v.published, "pub_dt": v.pub_dt,
-         "company": v.company, "location": v.location,
-         "salary": v.salary, "vacancy_hash": v.vacancy_hash}
-        for ms in all_sources for v in ms.vacancies[:MAX_PER_SOURCE]
-    ]
-
-    try:
-        await context.bot.delete_message(chat_id=query.message.chat_id, message_id=wait_msg.message_id)
-    except Exception:
-        pass
+    pending = context.chat_data.get("pending_vacancies", [])
 
     if not pending:
-        msg = await query.message.reply_text("Вакансій не знайдено (або всі приховані).")
+        msg = await query.message.reply_text(
+            "Вакансій не знайдено (або всі приховані).",
+            reply_markup=build_no_vacancies_keyboard(),
+        )
         track(context, msg.message_id)
         return
 
     ids = await _send_vacancies(query.message.chat, pending, context, user_id)
     track(context, *ids)
+
+    raw_days = query.data[len(CB_CONFIRM_YES):]
+    days: int | None = None if raw_days == "all" else int(raw_days)
+    period = f"за останні {days} д." if days else "за весь час"
+    cats_str = ", ".join(get_user_categories(context, user_id) or AVAILABLE_CATEGORIES)
+    count = len(pending)
+
     msg = await query.message.chat.send_message(
-        "✅ Всі доступні запитані вакансії доступні для перегляду вище.",
+        f"✅ Всі доступні вакансії {period} для категорій ({cats_str}) "
+        f"доступні для перегляду вище. ({count} {vacancies_word(count)})"
     )
     track(context, msg.message_id)
 
@@ -558,16 +687,23 @@ async def hide_vacancy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await query.answer()
 
     short_link = query.data[len(CB_HIDE):]
+    user_id = query.from_user.id
     hidden = get_hidden(context, update)
 
-    caption = query.message.caption or ""
-    title = next(
-        (line.replace("💼", "").replace("Спеціальність:", "").strip()
-         for line in caption.split("\n") if "Спеціальність:" in line),
-        "вакансія"
-    )
-
-    hidden[short_link] = title
+    cached = get_vacancy_cache(context, user_id).get(short_link)
+    if cached:
+        title = cached["title"]
+        cat = cached.get("category")
+        hidden[short_link] = {**cached, "categories": [cat] if cat else []}
+    else:
+        # Fallback (напр. кеш втрачено після перезапуску бота) — беремо тільки title з підпису
+        caption = query.message.caption or ""
+        title = next(
+            (line.replace("💼", "").replace("Спеціальність:", "").strip()
+             for line in caption.split("\n") if "Спеціальність:" in line),
+            "вакансія"
+        )
+        hidden[short_link] = {"title": title, "categories": []}
     set_hidden(context, update, hidden)
 
     await query.edit_message_caption(
@@ -585,14 +721,25 @@ async def unhide_vacancy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     short_link = query.data[len(CB_UNHIDE):]
     hidden = get_hidden(context, update)
-    title = hidden.pop(short_link, "вакансія")
+    data = hidden.pop(short_link, {"title": "вакансія"})
     set_hidden(context, update, hidden)
+    title = data.get("title", "вакансія")
 
-    all_sources = fetch_all_vacancies()
-    found = next(
-        (v for ms in all_sources for v in ms.vacancies if v.link[:50] == short_link),
-        None,
-    )
+    if "link" in data:
+        # Повні дані вже є (закешовані при показі) — RSS фетч не потрібен
+        found = Vacancy(
+            source=data.get("source", ""), title=data["title"], link=data["link"],
+            published=data.get("published", ""), pub_dt=data.get("pub_dt"),
+            company=data.get("company", ""), location=data.get("location", ""),
+            salary=data.get("salary", ""), vacancy_hash=data.get("vacancy_hash", ""),
+        )
+    else:
+        # Fallback (напр. кеш втрачено після перезапуску бота) — доводиться фетчити
+        all_sources = await asyncio.to_thread(fetch_all_vacancies)
+        found = next(
+            (v for ms in all_sources for v in ms.vacancies if make_link_hash(v.link) == short_link),
+            None,
+        )
 
     if found:
         image = generate_vacancy_image(found.title, 0)
@@ -625,21 +772,53 @@ async def restore_vacancy(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 # ── Список прихованих ─────────────────────────────────────────────────────────
 
-async def _show_hidden(chat, context: ContextTypes.DEFAULT_TYPE, update: Update) -> None:
-    hidden = get_hidden(context, update)
+def _hidden_for_current_categories(context: ContextTypes.DEFAULT_TYPE, update: Update) -> dict[str, dict]:
+    """Вилучені вакансії обраних зараз категорій — не весь глобальний список
+    (він міг накопичитись, поки були обрані інші категорії)."""
+    hidden_all = get_hidden(context, update)
+    user_cats = set(get_user_categories(context, update.effective_user.id))
+    if not user_cats:
+        return hidden_all
+    return {k: v for k, v in hidden_all.items() if user_cats & set(v.get("categories", []))}
+
+
+async def _show_hidden_prompt(chat, context: ContextTypes.DEFAULT_TYPE, update: Update) -> None:
+    """Крок 1: тільки кількість + кнопка підтвердження, без завантаження карток."""
+    hidden = _hidden_for_current_categories(context, update)
     if not hidden:
-        msg = await chat.send_message("📭 Список прихованих вакансій порожній.")
+        msg = await chat.send_message("📭 Список вилучених вакансій порожній.")
+        track(context, msg.message_id)
+        return
+
+    count = len(hidden)
+    msg = await chat.send_message(
+        f"🙈 <b>У списку вилучених — {count} {vacancies_word(count)}.</b>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=build_show_hidden_prompt_keyboard(),
+    )
+    track(context, msg.message_id)
+
+
+async def _show_hidden(chat, context: ContextTypes.DEFAULT_TYPE, update: Update) -> None:
+    """Крок 2: власне список карток вилучених вакансій (після підтвердження)."""
+    hidden = _hidden_for_current_categories(context, update)
+
+    if not hidden:
+        msg = await chat.send_message("📭 Список вилучених вакансій порожній.")
         track(context, msg.message_id)
         return
 
     msg = await chat.send_message(
-        f"🙈 <b>Приховані вакансії ({len(hidden)}):</b>",
+        f"🙈 <b>Вилучені вакансії ({len(hidden)}):</b>",
         parse_mode=ParseMode.HTML,
     )
     track(context, msg.message_id)
-    for short_link, title in hidden.items():
-        msg = await chat.send_message(
-            f"🙈 <b>{html.escape(title)}</b>",
+    for i, (short_link, data) in enumerate(hidden.items(), 1):
+        title = data.get("title", "вакансія")
+        image = generate_vacancy_image(title, i)
+        msg = await chat.send_photo(
+            photo=image,
+            caption=f"🙈 <b>{html.escape(title)}</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=build_restore_keyboard(short_link),
         )
@@ -652,6 +831,14 @@ async def show_hidden_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await _show_hidden(query.message.chat, context, update)
 
 
+async def show_hidden_prompt_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Проміжний крок з inline-кнопки (напр. з "нічого не знайдено") — спершу
+    кількість + підтвердження, а не одразу повний список."""
+    query = update.callback_query
+    await query.answer()
+    await _show_hidden_prompt(query.message.chat, context, update)
+
+
 # ── Очищення ──────────────────────────────────────────────────────────────────
 
 async def add_to_favorites(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -662,14 +849,18 @@ async def add_to_favorites(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = query.from_user.id
     favs = get_favorites(context, user_id)
 
-    # Зберігаємо дані вакансії з caption
-    caption = query.message.caption or ""
-    title = next(
-        (line.replace("💼", "").replace("Спеціальність:", "").strip()
-         for line in caption.split("\n") if "Спеціальність:" in line),
-        "вакансія"
-    )
-    favs[short_link] = {"title": title, "short_link": short_link}
+    cached = get_vacancy_cache(context, user_id).get(short_link)
+    if cached:
+        favs[short_link] = cached
+    else:
+        # Fallback (напр. кеш втрачено після перезапуску бота) — беремо тільки title з підпису
+        caption = query.message.caption or ""
+        title = next(
+            (line.replace("💼", "").replace("Спеціальність:", "").strip()
+             for line in caption.split("\n") if "Спеціальність:" in line),
+            "вакансія"
+        )
+        favs[short_link] = {"title": title, "short_link": short_link}
     set_favorites(context, user_id, favs)
 
     # Оновлюємо кнопку на "В обраному"
@@ -733,7 +924,7 @@ async def show_favorites_prompt(chat, context: ContextTypes.DEFAULT_TYPE, user_i
         InlineKeyboardButton("✅ Так", callback_data=CB_FAVS_YES),
     ]])
     msg = await chat.send_message(
-        f"⭐ <b>У списку Обраних вакансій є {count} вак.</b>\n\n❓ Показати їх?",
+        f"⭐ <b>У списку Обраних вакансій є {count} {vacancies_word(count)}.</b>\n\n❓ Показати їх?",
         parse_mode=ParseMode.HTML,
         reply_markup=confirm_kb,
     )
@@ -753,18 +944,33 @@ async def favs_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         track(context, msg.message_id)
         return
 
-    # Завантажуємо всі вакансії і фільтруємо по short_link
-    all_sources = fetch_all_vacancies(days=None)
+    # Повні дані вже закешовані з моменту додавання в обране (get_vacancy_cache) —
+    # RSS фетч потрібен лише для старих записів без кешу (напр. після перезапуску бота).
     fav_vacancies = []
-    for ms in all_sources:
-        for v in ms.vacancies:
-            if v.link[:50] in favs:
-                fav_vacancies.append({
-                    "source": v.source, "title": v.title, "link": v.link,
-                    "published": v.published, "pub_dt": v.pub_dt,
-                    "company": v.company, "location": v.location,
-                    "salary": v.salary, "vacancy_hash": v.vacancy_hash,
-                })
+    missing_links = set()
+    for short_link, data in favs.items():
+        if "link" in data:
+            fav_vacancies.append({
+                "source": data.get("source", ""), "title": data["title"], "link": data["link"],
+                "published": data.get("published", ""), "pub_dt": data.get("pub_dt"),
+                "company": data.get("company", ""), "location": data.get("location", ""),
+                "salary": data.get("salary", ""), "vacancy_hash": data.get("vacancy_hash", ""),
+            })
+        else:
+            missing_links.add(short_link)
+
+    if missing_links:
+        all_sources = await asyncio.to_thread(fetch_all_vacancies, days=None)
+        for ms in all_sources:
+            for v in ms.vacancies:
+                if make_link_hash(v.link) in missing_links:
+                    fav_vacancies.append({
+                        "source": v.source, "title": v.title, "link": v.link,
+                        "published": v.published, "pub_dt": v.pub_dt,
+                        "company": v.company, "location": v.location,
+                        "salary": v.salary, "vacancy_hash": v.vacancy_hash,
+                        "category": v.category,
+                    })
 
     if not fav_vacancies:
         msg = await query.message.reply_text(
@@ -779,7 +985,7 @@ async def favs_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
     track(context, *ids)
     msg = await query.message.chat.send_message(
-        f"✅ Показано {len(fav_vacancies)} обраних вакансій."
+        f"✅ Показано {len(fav_vacancies)} {obrani_vacancies_phrase(len(fav_vacancies))}."
     )
     track(context, msg.message_id)
 
@@ -795,7 +1001,7 @@ async def favs_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def fav_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Видаляє вакансію з обраних при перегляді списку."""
     query = update.callback_query
-    await query.answer("🗑 Видалено з обраних")
+    await query.answer("💔 Прибрано з обраних")
     short_link = query.data[len(CB_FAV_DELETE):]
     favs = get_favorites(context, query.from_user.id)
     favs.pop(short_link, None)
@@ -882,6 +1088,19 @@ def main() -> None:
 
     app = Application.builder().token(BOT_TOKEN).build()
 
+    storage.init_db()
+    all_hidden = storage.load_all_hidden()
+    all_favorites = storage.load_all_favorites()
+    for uid, data in all_hidden.items():
+        app.bot_data[f"hidden_{uid}"] = data
+    for uid, data in all_favorites.items():
+        app.bot_data[f"favorites_{uid}"] = data
+    logger.info(
+        "Підвантажено з БД: %d hidden-записів, %d favorites-записів",
+        sum(len(d) for d in all_hidden.values()),
+        sum(len(d) for d in all_favorites.values()),
+    )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(toggle_category,       pattern=f"^{CB_CAT_TOGGLE}"))
     app.add_handler(CallbackQueryHandler(confirm_categories,    pattern=f"^{CB_CAT_CONFIRM}$"))
@@ -891,6 +1110,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(confirm_show,    pattern=f"^{CB_CONFIRM_YES}"))
     app.add_handler(CallbackQueryHandler(confirm_no,      pattern=f"^{CB_CONFIRM_NO}$"))
     app.add_handler(CallbackQueryHandler(show_hidden_list,pattern=f"^{CB_SHOW_HIDDEN}$"))
+    app.add_handler(CallbackQueryHandler(show_hidden_prompt_callback, pattern=f"^{CB_SHOW_HIDDEN_PROMPT}$"))
     app.add_handler(CallbackQueryHandler(clear_history,   pattern=f"^{CB_CLEAR}$"))
     app.add_handler(CallbackQueryHandler(clear_hidden,    pattern=f"^{CB_CLEAR_HIDE}$"))
     app.add_handler(CallbackQueryHandler(hide_vacancy,          pattern=f"^{CB_HIDE}"))
