@@ -100,18 +100,125 @@ def _dedup_key(v: Vacancy) -> tuple[str, str]:
     return (v.title.strip().lower(), v.company.strip().lower())
 
 
+_HOMOGLYPH_MAP = str.maketrans({
+    "С": "C", "с": "c", "Е": "E", "е": "e", "О": "O", "о": "o",
+    "Р": "P", "р": "p", "Х": "X", "х": "x", "А": "A", "а": "a",
+    "В": "B", "в": "b", "Н": "H", "н": "h", "К": "K", "к": "k",
+    "М": "M", "м": "m", "Т": "T", "т": "t",
+})
+
+def _normalize_homoglyphs(s: str) -> str:
+    """Замінює кириличні літери-двійники (С→C, Е→E тощо) на латинські для порівняння."""
+    return s.translate(_HOMOGLYPH_MAP)
+
+
 def _is_invalid_company(text: str, title: str = "") -> bool:
     """Повертає True якщо текст НЕ є назвою компанії."""
     if not text:
         return True
-    t = text.strip()
-    # Закінчується на двокрапку або кому — це заголовок опису
-    if t.endswith(":") or t.endswith(","):
+    # Нормалізуємо nbsp (\xa0) до звичайного пробілу та типографські апострофи
+    t = text.strip().replace("\xa0", " ").replace("\u2019", "'").replace("\u2018", "'")
+    t = _re.sub(r"\s+", " ", t).strip()
+    # Закінчується на двокрапку, кому, крапку або знак питання — заголовок/речення
+    if t.endswith((":", ",", ".", "?", "!")):
         return True
     # Довше 60 символів — скоріш за все опис
     if len(t) > 60:
         return True
-    # Збігається з назвою посади (title дублюється)
+    # Більше 5 слів — швидше речення, ніж назва компанії
+    if len(t.split()) > 5:
+        return True
+    # Містить "/" — швидше перелік технологій/посад, ніж назва компанії
+    # (напр. "Hardware, Software та MilTech/IoT")
+    if "/" in t:
+        return True
+    # Перше слово — типовий службовий/функціональний маркер (не буває на початку
+    # реальної назви компанії): займенники, сполучники, заголовки секцій тощо
+    GENERIC_LEADING_WORDS = {
+        "можливість", "де", "коли", "яка", "який", "яке", "які",
+        "що", "як", "чим", "і", "та", "а", "чи", "або", "не", "це", "хто",
+        "ваша", "ваш", "ваші", "наш", "наша", "наші", "наший",
+        "основні", "необхідні", "вимоги", "обов'язки",
+        "команда", "команди", "компанія", "компанії", "клієнта", "клієнт",
+        "core", "what", "responsibilities", "requirements", "qualifications",
+        "about", "your", "level", "focus", "location", "sensor", "ideal",
+        "nice", "tools", "sensor & platform",
+        "this", "that", "it", "he", "she", "they", "we", "you", "i",
+        "надсилайте", "надсилай", "надішли",
+    }
+    # Кандидат — просто число + слово (наприклад "5 роки", "3 years") — не назва
+    if _re.match(r'^\d+[\+]?\s*(?:рок|рік|year|міс)', t.lower()):
+        return True
+    first_word = t.lower().split()[0].strip("'\"()") if t.split() else ""
+    if first_word in GENERIC_LEADING_WORDS:
+        return True
+    # Збігається з назвою посади (title дублюється) — порівнюємо з урахуванням гомогліфів
+    if title:
+        t_norm = _normalize_homoglyphs(t).lower()
+        title_norm = _normalize_homoglyphs(title).lower()
+        if t_norm == title_norm:
+            return True
+        # Перші 2 слова company збігаються з першими 2 словами title — дублікат
+        t_words = t_norm.split()[:2]
+        ti_words = title_norm.split()[:2]
+        if t_words and t_words == ti_words:
+            return True
+        # Узагальнена перевірка перекриття значущих слів (>=3 символи) з title —
+        # ловить дублікати типу "Senior CRM & Workflow Administrator" при
+        # title="CRM / Workflow Administrator"
+        strip_punct = lambda w: _re.sub(r"[^\w]", "", w)
+        t_sig = {strip_punct(w) for w in t_norm.split() if len(strip_punct(w)) >= 3}
+        ti_sig = {strip_punct(w) for w in title_norm.split() if len(strip_punct(w)) >= 3}
+        t_sig.discard("")
+        ti_sig.discard("")
+        if t_sig and ti_sig:
+            overlap = t_sig & ti_sig
+            smaller = min(len(t_sig), len(ti_sig))
+            if smaller and len(overlap) / smaller >= 0.6:
+                return True
+    # Типові заголовки секцій вакансій та загальні іменники (точний збіг)
+    SECTION_HEADERS = {
+        "огляд", "опис", "опис вакансії", "про вакансію", "про проект",
+        "про проєкт", "про компанію", "про нас", "про роль", "деталі",
+        "вимоги", "обов'язки", "умови", "переваги", "бенефіти",
+        "компанія", "компанії", "команда", "команди", "клієнта", "клієнт",
+        "клієнти", "проєкт", "проєкту", "продукт", "продукту",
+        "бізнес", "бізнесу", "де команда", "ваша роль",
+        "overview", "description", "about us", "about the role",
+        "about the team", "your role", "your mission",
+        "core technical skills", "sensor & platform experience",
+        "ideal candidate profile", "nice to have",
+        "tools & technologies you'll work with", "what you'll do",
+        "what we're looking for", "requirements", "responsibilities",
+        "benefits", "what we offer", "qualifications",
+    }
+    if t.lower() in SECTION_HEADERS:
+        return True
+    # Типові слова що вказують на опис а не назву компанії
+    desc_markers = (
+        "ми шукаємо", "що потрібний", "зсу в ", "займаємося", "цінності",
+        "обов'язки", "вимоги", "умови", "пропонуємо",
+        "architect the", "management:", "stack &", "tool management",
+        "якому довіряють", "якій довіряють", "очікуємо від тебе",
+    )
+    tl = t.lower()
+    if any(m in tl for m in desc_markers):
+        return True
+    return False
+
+
+def _is_invalid_dou_company(text: str, title: str = "") -> bool:
+    """Легка валідація company для DOU title-парсингу.
+    Без обмеження кількості слів — офіційні назви військових частин
+    можуть бути довгими ('414 окрема бригада безпілотних систем «Птахи Мадяра»').
+    """
+    if not text:
+        return True
+    t = text.strip().replace("\u2019", "'").replace("\u2018", "'")
+    if t.endswith(":") or t.endswith(",") or t.endswith("."):
+        return True
+    if len(t) > 100:
+        return True
     if title and t.lower() == title.lower():
         return True
     # Якщо перші 2 слова company збігаються з першими 2 словами title — дублікат
@@ -120,16 +227,6 @@ def _is_invalid_company(text: str, title: str = "") -> bool:
         ti_words = title.lower().split()[:2]
         if t_words and t_words == ti_words:
             return True
-    # Типові слова що вказують на опис а не назву компанії
-    desc_markers = (
-        "ми шукаємо", "що потрібний", "зсу в ", "займаємося", "цінності",
-        "обов'язки", "вимоги", "умови", "пропонуємо",
-        "architect the", "management:", "stack &", "tool management",
-        "якому довіряють", "якій довіряють",
-    )
-    tl = t.lower()
-    if any(m in tl for m in desc_markers):
-        return True
     return False
 
 
@@ -200,7 +297,7 @@ def _parse_dou_title(raw_title: str) -> tuple[str, str, str, str]:
             idx2 = remainder_after_sep.find(sep2)
             if idx2 != -1:
                 parts2 = [p.strip() for p in remainder_after_sep[idx2 + len(sep2):].split(",")]
-                if parts2 and not _is_invalid_company(parts2[0], title):
+                if parts2 and not _is_invalid_dou_company(parts2[0], title):
                     company = parts2[0]
                     if len(parts2) == 2:
                         if _SALARY_RE.search(parts2[1]):
@@ -257,13 +354,13 @@ def _parse_dou_title(raw_title: str) -> tuple[str, str, str, str]:
         company, location = _split_company_and_cities(company)
 
     # Якщо company невалідна — пробуємо знайти наступний роздільник у залишку рядка
-    if _is_invalid_company(company, title):
+    if _is_invalid_dou_company(company, title):
         remainder = raw_title[sep_idx + len(separator):]
         for sep2 in (" в ", " на ", " у "):
             idx2 = remainder.find(sep2)
             if idx2 != -1:
                 parts2 = [p.strip() for p in remainder[idx2 + len(sep2):].split(",")]
-                if parts2 and not _is_invalid_company(parts2[0], title):
+                if parts2 and not _is_invalid_dou_company(parts2[0], title):
                     company = parts2[0]
                     # Перебираємо решту parts2 для salary/location
                     if len(parts2) == 2:
@@ -313,12 +410,26 @@ _CITY_FORMS: dict[str, str] = {
 _CITY_KEYS_SORTED = sorted(_CITY_FORMS.keys(), key=len, reverse=True)
 
 
-def _extract_location(entry) -> str:
-    """Витягує місто з title/description через словник форм назв міст."""
-    text = " ".join([
+def _extract_location(entry, source_name: str = "") -> str:
+    """Витягує місто з title/description через словник форм назв міст.
+    Також шукає 'формат роботи' для визначення віддаленої роботи.
+
+    Парсинг description застосовується ТІЛЬКИ для Djinni-джерел —
+    для DOU локація вже витягується з <title> через _parse_dou_title.
+    """
+    if source_name and "djinni" not in source_name.lower():
+        return "не знайдено"
+
+    import html as _html
+
+    raw = " ".join([
         getattr(entry, "title", ""),
         getattr(entry, "summary", "") or getattr(entry, "description", ""),
-    ]).lower()
+    ])
+    text = _html.unescape(_html.unescape(raw)).lower()
+
+    if _re.search(r'(?:формат роботи[:\s—-]+віддален|віддален\w*\s+формат роботи)', text):
+        return "Віддалено"
 
     for form in _CITY_KEYS_SORTED:
         if form in text:
@@ -342,51 +453,96 @@ _LATIN_RE = _re.compile(r'[A-Za-z]')
 
 def _extract_company_from_description(description: str) -> str:
     """
-    Витягує назву компанії з HTML-опису вакансії Djinni.
+    Витягує назву компанії з HTML-опису вакансії.
 
     Стратегії (в порядку пріоритету):
-    1. Перший <strong>Назва</strong> — якщо містить латиницю або це перший strong в описі
-    2. Текст після <p> до " -" або " —" — якщо містить латиницю
+    1. "Назва розробляє/шукає/займається..." — найнадійніший патерн
+    2. Перший ВАЛІДНИЙ <strong>Назва</strong> (пропускає заголовки типу "Чим ми займаємося:")
+    3. Текст після <p> до " -" або " —" — якщо містить латиницю
     """
     import html as _html
 
     if not description:
         return ""
 
-    # Декодуємо HTML-entities
-    text = _html.unescape(description)
+    text = _html.unescape(_html.unescape(description))
 
-    # Стратегія 1: перший <strong>...</strong>
-    strong_match = _re.search(r'<strong[^>]*>(.*?)</strong>', text, _re.IGNORECASE | _re.DOTALL)
-    if strong_match:
-        candidate = _re.sub(r'<[^>]+>', '', strong_match.group(1)).strip()
-        # Беремо якщо містить латиницю або досить коротке (ймовірно назва)
-        if candidate and (bool(_LATIN_RE.search(candidate)) or len(candidate) < 40):
-            return candidate
+    # Стратегія 1: "Назва дієслово" — компанія перед типовим дієсловом-маркером.
+    # Обробляємо КОЖЕН <p> окремо, щоб не захоплювати текст із сусідніх параграфів.
+    ACTION_VERBS = (
+        r'розробляє', r'займається', r'шукає', r'запрошує',
+        r'надає', r'створює', r'є лідером',
+        r'є компанією', r'спеціалізується', r'працює',
+    )
+    STOP_WORDS = {
+        "ми", "вони", "він", "вона", "я", "ти", "це",
+        "наша", "наш", "наші", "що", "як", "чим", "хто", "де", "коли",
+        "що ми", "як ми", "чим ми",
+        "яка", "який", "яке", "які", "котра", "котрий", "котре", "котрі",
+        "команда", "команди", "компанія", "компанії", "клієнта", "клієнт",
+        "проєкт", "проєкту", "продукт", "продукту",
+    }
+    verb_pattern = r'([A-Za-zА-ЯҐЄІЇа-яґєії0-9][A-Za-zА-ЯҐЄІЇа-яґєії0-9\s\-\.&]{0,50}?)\s+(?:' + '|'.join(ACTION_VERBS) + r')\b'
 
-    # Стратегія 2: текст між <p> і першим " -" або " —"
-    p_match = _re.search(r'<p[^>]*>(.*?)(?:\s[-—]|\Z)', text, _re.IGNORECASE | _re.DOTALL)
-    if p_match:
-        candidate = _re.sub(r'<[^>]+>', '', p_match.group(1)).strip()
-        candidate = candidate.strip('- —\n')
-        # Беремо тільки якщо містить латиницю і не занадто довге
-        if candidate and bool(_LATIN_RE.search(candidate)) and len(candidate) < 60:
+    paragraphs = _re.findall(r'<p[^>]*>(.*?)</p>', text, _re.IGNORECASE | _re.DOTALL) or [text]
+    for para in paragraphs:
+        para_plain = _re.sub(r'<[^>]+>', ' ', para)
+        para_plain = _html.unescape(para_plain).strip()
+
+        for verb_match in _re.finditer(verb_pattern, para_plain, _re.IGNORECASE):
+            candidate = verb_match.group(1).strip().rstrip(',')
+            parts = _re.split(r'[\n\.\!:]', candidate)
+            candidate = parts[-1].strip() if parts else candidate
+            cand_lower = candidate.lower()
+            words = cand_lower.split()
+            if all(w in STOP_WORDS for w in words):
+                continue
+            if (candidate
+                    and len(candidate) < 60
+                    and cand_lower not in STOP_WORDS
+                    and not _is_invalid_company(candidate)):
+                return candidate
+
+    # Стратегія 2 (позитивний патерн): "Назва — опис" або "Назва is a/an/the ..."
+    # ЛИШЕ на початку абзацу, і ЛИШЕ серед перших 3 абзаців опису — вступ
+    # про компанію завжди йде на самому початку. Якщо шукати по всьому тексту,
+    # той самий патерн (тире/дієслово "is") трапляється в будь-якому реченні
+    # десь всередині опису і дає хибні спрацювання.
+    intro_pattern = _re.compile(
+        r'^\s*(?:<strong[^>]*>\s*)?'
+        r'([A-Za-zА-ЯҐЄІЇа-яґєії0-9][^<]{1,58}?)'
+        r'\s*(?:</strong>\s*)?'
+        r'(?:[-—]\s|is\s+an?\s+|is\s+the\s+)',
+        _re.IGNORECASE,
+    )
+    for para in paragraphs[:3]:
+        m = intro_pattern.match(para)
+        if not m:
+            continue
+        candidate = _re.sub(r'<[^>]+>', '', m.group(1)).strip()
+        if candidate and not _is_invalid_company(candidate):
             return candidate
 
     return ""
 
 
-def _extract_company(entry, title: str = "") -> str:
+def _extract_company(entry, title: str = "", source_name: str = "") -> str:
     """Витягує компанію: спочатку RSS-поля, потім парсинг description.
-    Валідує результат через _is_invalid_company.
+
+    Парсинг <description> застосовується ТІЛЬКИ для Djinni-джерел
+    (Deftech Djinni, Djinni) — у DOU вся інформація вже в <title>,
+    і парсинг description там дає хибні спрацювання.
     """
-    # Спочатку пробуємо стандартні RSS-поля
+    # Спочатку пробуємо стандартні RSS-поля (працює для обох типів джерел)
     for field in ("author", "dc_creator", "itunes_author"):
         val = getattr(entry, field, None)
         if val and val.strip() and not _is_invalid_company(val.strip(), title):
             return val.strip()
 
-    # Fallback: парсимо description
+    # Fallback на опис — тільки для Djinni
+    if "djinni" not in source_name.lower():
+        return ""
+
     description = getattr(entry, "summary", None) or getattr(entry, "description", "")
     candidate = _extract_company_from_description(description)
 
@@ -433,9 +589,13 @@ def _fetch_feed(source_name: str, url: str) -> list[Vacancy]:
         title, company, salary, loc_from_title = _parse_dou_title(raw_title)
 
         if not company:
-            company = _extract_company(entry, title)
+            company = _extract_company(entry, title, source_name)
+            if not company:
+                raw_desc = getattr(entry, "summary", None) or getattr(entry, "description", "")
+                print(f"{GREEN}  [NO COMPANY] title={title!r}")
+                print(f"    description raw (перші 300): {repr(raw_desc[:300])}{RESET}")
 
-        location = loc_from_title or _extract_location(entry)
+        location = loc_from_title or _extract_location(entry, source_name)
         published = dt.strftime("%d.%m.%Y") if dt else (getattr(entry, "published", "") or "невідомо")
 
         vacancies.append(Vacancy(
@@ -508,39 +668,56 @@ def _passes_date(v: Vacancy, cutoff) -> bool:
     return passes
 
 
-def _fetch_raw(days: int | None = None, categories: list[str] | None = None) -> dict[str, list[Vacancy]]:
-    """Завантажує всі джерела для обраних категорій, дедуплікує та фільтрує по даті."""
+def _fetch_raw(days: int | None = None, categories: list[str] | None = None) -> tuple[dict[str, list[Vacancy]], dict[str, int]]:
+    """Завантажує всі джерела. Повертає (raw, dups_per_source)."""
     raw_feeds = build_feeds_for_categories(categories or AVAILABLE_CATEGORIES)
     cutoff = _date_cutoff(days)
     cutoff_str = cutoff.strftime("%d.%m.%Y") if cutoff else "без обмежень"
 
     raw: dict[str, list[Vacancy]] = {}
+    dups_per_source: dict[str, int] = {}
+
     for source_name, urls in raw_feeds.items():
-        seen: set[tuple[str, str]] = set()
+        seen_full: set[tuple[str, str]] = set()
+        seen_title: set[str] = set()
         vacancies: list[Vacancy] = []
         filtered_out = 0
+        inner_dups = 0
 
         for url in urls:
             for v in _fetch_feed(source_name, url):
                 if not _passes_date(v, cutoff):
                     filtered_out += 1
                     continue
-                if not v.title.strip() or not v.company.strip():
+                t = v.title.strip().lower()
+                c = v.company.strip().lower()
+                if not t:
                     vacancies.append(v)
                     continue
-                key = _dedup_key(v)
-                if key not in seen:
-                    seen.add(key)
-                    vacancies.append(v)
+                if c:
+                    if (t, c) not in seen_full:
+                        seen_full.add((t, c))
+                        vacancies.append(v)
+                    else:
+                        inner_dups += 1
+                else:
+                    if t not in seen_title and not any(t == k[0] for k in seen_full):
+                        seen_title.add(t)
+                        vacancies.append(v)
+                    else:
+                        inner_dups += 1
 
         print(
             f"{GREEN}[FILTER] {source_name}: "
-            f"{len(vacancies)} вак. залишилось | "
-            f"відфільтровано по даті: {filtered_out} "
+            f"{len(vacancies)} вак. | "
+            f"дата відфільтровано: {filtered_out} | "
+            f"дублікатів всередині: {inner_dups} "
             f"(cutoff: {cutoff_str}){RESET}"
         )
         raw[source_name] = vacancies
-    return raw
+        dups_per_source[source_name] = inner_dups
+
+    return raw, dups_per_source
 
 
 # ── Логування ─────────────────────────────────────────────────────────────────
@@ -555,28 +732,61 @@ def _log_list(name: str, vacancies: list[Vacancy]) -> None:
 
 # ── Злиття з дедуплікацією ────────────────────────────────────────────────────
 
+def _dedup_key_flexible(v: Vacancy) -> tuple[str, str]:
+    """Ключ дедуплікації: якщо company порожній — тільки title."""
+    title = v.title.strip().lower()
+    company = v.company.strip().lower()
+    return (title, company)  # ("title", "") теж унікальний ключ для порівняння по title
+
+
 def _merge(name: str, primary: list[Vacancy], secondary: list[Vacancy]) -> tuple[list[Vacancy], int]:
-    """Об'єднує два списки. При збігу (title, company) — видаляє з secondary.
-    Вакансії з порожнім title або company НЕ беруть участь у порівнянні — завжди залишаються.
+    """Об'єднує два списки. При збігу — видаляє з secondary.
+    Правило: якщо обидва title і company заповнені — порівнюємо по (title, company).
+    Якщо company порожній — порівнюємо тільки по title.
     """
-    seen: set[tuple[str, str]] = {
-        _dedup_key(v) for v in primary
-        if v.title.strip() and v.company.strip()
-    }
+    # Будуємо seen з primary
+    seen_full: set[tuple[str, str]] = set()   # (title, company) де company не порожній
+    seen_title: set[str] = set()               # тільки title де company порожній
+
+    for v in primary:
+        t = v.title.strip().lower()
+        c = v.company.strip().lower()
+        if t and c:
+            seen_full.add((t, c))
+        elif t:
+            seen_title.add(t)
+
     unique_secondary: list[Vacancy] = []
     duplicates = 0
 
     print(f"{GREEN}\n[MERGE → {name}] primary={len(primary)}, secondary={len(secondary)}{RESET}")
     for v in secondary:
-        if not v.title.strip() or not v.company.strip():
+        t = v.title.strip().lower()
+        c = v.company.strip().lower()
+
+        if not t:
+            # Порожній title — завжди залишаємо
             unique_secondary.append(v)
             continue
-        key = _dedup_key(v)
-        if key in seen:
+
+        is_dup = False
+        if c:
+            # Є і title і company — порівнюємо по парі
+            if (t, c) in seen_full:
+                is_dup = True
+            else:
+                seen_full.add((t, c))
+        else:
+            # company порожній — порівнюємо тільки по title
+            if t in seen_title or any(t == k[0] for k in seen_full):
+                is_dup = True
+            else:
+                seen_title.add(t)
+
+        if is_dup:
             print(f"{GREEN}  ✂ ДУБЛІКАТ: title={v.title!r}, company={v.company!r}{RESET}")
             duplicates += 1
         else:
-            seen.add(key)
             unique_secondary.append(v)
 
     combined = primary + unique_secondary
@@ -592,7 +802,7 @@ def fetch_all_vacancies(days: int | None = None, categories: list[str] | None = 
     Кожна категорія → 4 джерела → 1 MergedSource у фіналі.
     """
     active_cats = categories or AVAILABLE_CATEGORIES
-    raw = _fetch_raw(days=days, categories=active_cats)
+    raw, dups_per_source = _fetch_raw(days=days, categories=active_cats)
 
     print(f"{GREEN}\n{'='*60}\nЕТАП 0: Сирі дані\n{'='*60}{RESET}")
     for name, vacancies in raw.items():
@@ -603,24 +813,35 @@ def fetch_all_vacancies(days: int | None = None, categories: list[str] | None = 
     for cat in active_cats:
         print(f"{GREEN}\n{'='*60}\nЗЛИТТЯ: {cat}\n{'='*60}{RESET}")
 
-        temp_djinni, _ = _merge(f"Temp Djinni {cat}",
+        temp_djinni, djinni_stage1_dups = _merge(f"Temp Djinni {cat}",
             raw.get(f"Deftech Djinni {cat}", []),
             raw.get(f"Djinni {cat}", []))
-        temp_dou, _ = _merge(f"Temp DOU {cat}",
+        temp_dou, dou_stage1_dups = _merge(f"Temp DOU {cat}",
             raw.get(f"Deftech DOU {cat}", []),
             raw.get(f"DOU {cat}", []))
 
         _log_list(f"Temp Djinni {cat}", temp_djinni)
         _log_list(f"Temp DOU {cat}",    temp_dou)
 
-        final, dups = _merge(f"Final {cat}", temp_djinni, temp_dou)
+        # Етап 2: DOU primary (пріоритет), Djinni secondary — дублікати видаляються з Djinni
+        final, merge_dups = _merge(f"Final {cat}", temp_dou, temp_djinni)
         _log_list(f"Final {cat}", final)
+
+        # Загальна кількість дублікатів = всередині джерел (fetch_raw) +
+        # Етап 1 (Temp Djinni + Temp DOU мержі) + Етап 2 (фінальний мерж)
+        inner_dups = (
+            dups_per_source.get(f"Deftech Djinni {cat}", 0) +
+            dups_per_source.get(f"Djinni {cat}", 0) +
+            dups_per_source.get(f"Deftech DOU {cat}", 0) +
+            dups_per_source.get(f"DOU {cat}", 0)
+        )
+        total_dups = inner_dups + djinni_stage1_dups + dou_stage1_dups + merge_dups
 
         merged_sources.append(MergedSource(
             name=f"{cat} (з бронюванням)",
             vacancies=final,
             total_before=len(temp_djinni) + len(temp_dou),
-            duplicates=dups,
+            duplicates=total_dups,
         ))
 
     return merged_sources

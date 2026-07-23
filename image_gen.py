@@ -170,61 +170,72 @@ def _draw_mc_text(draw, text, x, y, font, color):
 
 
 def generate_vacancy_image(title: str, num: int = 0, is_new: bool = False, is_favorite: bool = False) -> io.BytesIO:
-    img  = _make_bg()
-    draw = ImageDraw.Draw(img)
+    """Генерує картинку фіксованого розміру: темний блок з жовтою рамкою на весь канвас."""
+    inner_pad = 12
 
-    # Темна напівпрозора плашка для тексту
-    pad = 20
-    sign_y1 = 45 if num else 60
-    sign_y2 = int(IMG_H * 0.72)
+    # Шрифти — розміри як і раніше, без змін
+    font_num   = _get_font(26)
+    font_new   = _get_font(22)
+    font_fav   = _get_font(20)
+    font_title = _get_font(42)
 
-    # Малюємо плашку через окремий шар
-    overlay = Image.new("RGBA", (IMG_W, IMG_H), (0, 0, 0, 0))
-    od = ImageDraw.Draw(overlay)
-    od.rectangle([pad, sign_y1, IMG_W-pad, sign_y2], fill=(10, 10, 40, 185))
-    od.rectangle([pad, sign_y1, IMG_W-pad, sign_y2], outline=(255, 215, 0), width=3)
-    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-    draw = ImageDraw.Draw(img)
+    wrapped = textwrap.fill(title, width=WRAP_WIDTH)
+    dummy = Image.new("RGB", (1, 1))
+    dd = ImageDraw.Draw(dummy)
 
-    # ── Плашка "NEW" у верхньому лівому куті ─────────────────────────────────
+    title_bb = dd.textbbox((0, 0), wrapped, font=font_title)
+    title_h  = title_bb[3] - title_bb[1]
+    title_w  = title_bb[2] - title_bb[0]
+
+    num_h = dd.textbbox((0, 0), "Вакансія #99", font=font_num)[3] if num else 0
+    fav_h = dd.textbbox((0, 0), "* Обране *", font=font_fav)[3] if is_favorite else 0
+    new_h = dd.textbbox((0, 0), "NEW", font=font_new)[3] if is_new else 0
+
+    top_row_h = max(num_h, new_h) if (num or is_new) else 0
+    content_h = (top_row_h + inner_pad if top_row_h else 0) + title_h + (inner_pad + fav_h if fav_h else 0)
+
+    # Фіксований розмір канвасу — рамка завжди займає весь простір
+    box_w = IMG_W
+    box_h = max(IMG_H, content_h + inner_pad * 2)
+
+    img  = Image.new("RGB", (box_w, box_h), (15, 15, 45))
+    draw = ImageDraw.Draw(img, "RGBA")
+
+    # Рамка на весь канвас
+    bx1, by1 = 0, 0
+    bx2, by2 = box_w - 1, box_h - 1
+    draw.rectangle([bx1, by1, bx2, by2], outline=GOLD, width=3)
+
+    # Верхній рядок: номер вакансії — у лівому верхньому куті з відступом
+    if num:
+        num_text = f"Вакансія #{num}"
+        _draw_mc_text(draw, num_text, bx1 + inner_pad, by1 + inner_pad, font_num, GOLD)
+
+    # NEW — у правому верхньому куті з відступом
     if is_new:
-        font_new = _get_font(27)
-        new_text = "✦ NEW ✦"
+        new_text = "NEW"
         nb = draw.textbbox((0, 0), new_text, font=font_new)
         nw = nb[2] - nb[0]
         nh = nb[3] - nb[1]
-        nx1 = pad + 2
-        ny1 = sign_y1 + 4
-        nx2 = nx1 + nw + 12
-        ny2 = ny1 + nh + 8
-        draw.rectangle([nx1, ny1, nx2, ny2], fill=(220, 30, 30))
-        draw.rectangle([nx1, ny1, nx2, ny2], outline=(255, 100, 100), width=2)
-        draw.text((nx1 + 6, ny1 + 4), new_text, font=font_new, fill=(255, 255, 255))
+        nx1 = bx2 - nw - inner_pad - 8
+        ny1 = by1 + inner_pad
+        nx2 = bx2 - inner_pad
+        ny2 = ny1 + nh + 4
+        draw.rectangle([nx1 - 4, ny1 - 2, nx2 + 4, ny2 + 2], fill=(200, 30, 30))
+        draw.rectangle([nx1 - 4, ny1 - 2, nx2 + 4, ny2 + 2], outline=(255, 80, 80), width=2)
+        draw.text((nx1, ny1), new_text, font=font_new, fill=WHITE)
 
-    # ── Мітка "Обране" жовтим текстом в самому низу зліва ───────────────────
+    # Назва — по центру всього канвасу (і по горизонталі, і по вертикалі)
+    tx = (box_w - title_w) // 2
+    ty = (box_h - title_h) // 2
+    _draw_mc_text(draw, wrapped, tx, ty, font_title, WHITE)
+
+    # "Обране" — у лівому нижньому куті з відступом
     if is_favorite:
-        font_fav = _get_font(24)
         fav_text = "* Обране *"
         fb = draw.textbbox((0, 0), fav_text, font=font_fav)
         fh = fb[3] - fb[1]
-        _draw_mc_text(draw, fav_text, pad + 6, IMG_H - fh - 6, font_fav, GOLD)
-
-    # Номер вакансії — жовтий
-    if num:
-        font_num = _get_font(30)  # 20 * 1.5
-        num_text = f">> Вакансія #{num} <<"
-        nb = draw.textbbox((0,0), num_text, font=font_num)
-        nx = (IMG_W - (nb[2]-nb[0])) // 2
-        _draw_mc_text(draw, num_text, nx, sign_y1 + 8, font_num, GOLD)
-
-    # Назва — білий текст
-    font_title = _get_font(46)
-    wrapped = textwrap.fill(title, width=WRAP_WIDTH)
-    tb = draw.textbbox((0,0), wrapped, font=font_title)
-    tw, th = tb[2]-tb[0], tb[3]-tb[1]
-    tx = (IMG_W - tw) // 2
-    ty = (sign_y1 + sign_y2 - th) // 2 + (10 if num else 0)
-    _draw_mc_text(draw, wrapped, tx, ty, font_title, WHITE)
+        _draw_mc_text(draw, fav_text, bx1 + inner_pad, by2 - fh - inner_pad, font_fav, GOLD)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")

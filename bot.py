@@ -47,6 +47,7 @@ CB_UNHIDE        = "unhide:"
 CB_RESTORE       = "restore:"
 CB_FAVORITE      = "fav:"
 CB_UNFAVORITE    = "unfav:"
+CB_FAV_DELETE    = "fav_del:"      # видалити з обраних при перегляді списку
 CB_SHOW_FAVS     = "show_favorites"
 CB_FAVS_YES      = "favs_yes"
 CB_FAVS_NO       = "favs_no"
@@ -169,18 +170,26 @@ def build_persistent_keyboard() -> ReplyKeyboardMarkup:
 def build_vacancy_keyboard(vacancy: Vacancy, is_favorite: bool = False) -> InlineKeyboardMarkup:
     short_link = vacancy.link[:50]
     fav_btn = InlineKeyboardButton(
-        "💛 В обраному" if is_favorite else "⭐ Додати в обране",
+        "💛 В обраному" if is_favorite else "⭐ В обране",
         callback_data=f"{CB_UNFAVORITE}{short_link}" if is_favorite else f"{CB_FAVORITE}{short_link}",
     )
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔗 Відкрити вакансію", url=vacancy.link)],
-        [fav_btn],
-        [InlineKeyboardButton("🚫 Вилучити з пошуку", callback_data=f"{CB_HIDE}{short_link}")],
+        [fav_btn, InlineKeyboardButton("🙈 Не показувати", callback_data=f"{CB_HIDE}{short_link}")],
     ])
 
 def build_restore_keyboard(short_link: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("♻️ Відновити вакансію", callback_data=f"{CB_RESTORE}{short_link}")],
+    ])
+
+def build_favorite_vacancy_keyboard(vacancy: Vacancy) -> InlineKeyboardMarkup:
+    """Клавіатура для вакансії зі списку Обраних — з кнопкою видалення."""
+    short_link = vacancy.link[:50]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔗 Відкрити вакансію", url=vacancy.link)],
+        [InlineKeyboardButton("🗑 Видалити з обраних", callback_data=f"{CB_FAV_DELETE}{short_link}")],
+        [InlineKeyboardButton("🚫 Вилучити з пошуку", callback_data=f"{CB_HIDE}{short_link}")],
     ])
 
 
@@ -203,25 +212,34 @@ UA_MONTHS = {
 }
 
 def format_date_ua(published: str) -> str:
-    """Перетворює 'dd.mm.yyyy' на '20 липня 2026'."""
+    """Перетворює дату будь-якого формату на '23.06.2026'."""
+    from email.utils import parsedate_to_datetime as _ptd
+    d = None
     try:
         d = datetime.strptime(published, "%d.%m.%Y")
-        return f"{d.day} {UA_MONTHS[d.month]} {d.year}"
-    except (ValueError, KeyError):
+    except (ValueError, TypeError):
+        pass
+    if d is None:
+        try:
+            d = _ptd(published)
+        except Exception:
+            pass
+    if d is None:
         return published
+    return f"{d.day:02d}.{d.month:02d}.{d.year}"
 
 
 def format_vacancy(vacancy: Vacancy, num: int = 0) -> str:
+    salary = clean_salary(vacancy.salary)
     lines = []
-    if num:
-        lines += [f"📌 <b>Вакансія #{num}</b>", ""]
-    lines += [f"💼 <b>Спеціальність:</b> {html.escape(vacancy.title)}", ""]
+    lines.append(f"💼 <b>Спеціальність:</b> {html.escape(vacancy.title)}")
     if vacancy.company:
-        lines += [f"🏢 <b>Компанія:</b> {html.escape(vacancy.company)}", ""]
+        lines.append(f"🏢 <b>Компанія:</b> {html.escape(vacancy.company)}")
     if vacancy.location:
-        lines += [f"📍 <b>Місце роботи:</b> {html.escape(vacancy.location)}", ""]
-    lines += [f"💰 <b>Зарплата:</b> {html.escape(clean_salary(vacancy.salary))}", ""]
-    lines += [f"📅 <b>Дата публікації:</b> {html.escape(format_date_ua(vacancy.published))}", ""]
+        lines.append(f"📍 <b>Місце роботи:</b> {html.escape(vacancy.location)}")
+    if salary and salary != "не вказано":
+        lines.append(f"💰 <b>Зарплата:</b> {html.escape(salary)}")
+    lines.append(f"📅 <b>Дата публікації:</b> {html.escape(format_date_ua(vacancy.published))}")
     lines.append(f"🌐 <b>Сайт:</b> {html.escape(vacancy.source)}")
     return "\n".join(lines)
 
@@ -238,7 +256,8 @@ def build_summary(sources: list[MergedSource], days: int | None) -> str:
 # ── Надсилання вакансій ───────────────────────────────────────────────────────
 
 async def _send_vacancies(chat, pending: list[dict], context: ContextTypes.DEFAULT_TYPE,
-                          user_id: int, force_favorite: bool = False) -> list[int]:
+                          user_id: int, force_favorite: bool = False,
+                          from_favorites: bool = False) -> list[int]:
     """Надсилає список вакансій. Нові позначаються NEW, обрані — зіркою."""
     seen = get_seen(context, user_id)
     favorites = get_favorites(context, user_id)
@@ -254,11 +273,12 @@ async def _send_vacancies(chat, pending: list[dict], context: ContextTypes.DEFAU
             new_hashes.append(vh)
 
         image = generate_vacancy_image(v.title, i, is_new=is_new, is_favorite=is_fav)
+        kb = build_favorite_vacancy_keyboard(v) if from_favorites else build_vacancy_keyboard(v, is_favorite=is_fav)
         msg = await chat.send_photo(
             photo=image,
             caption=format_vacancy(v, i),
             parse_mode=ParseMode.HTML,
-            reply_markup=build_vacancy_keyboard(v, is_favorite=is_fav),
+            reply_markup=kb,
         )
         ids.append(msg.message_id)
 
@@ -391,11 +411,11 @@ async def _request_vacancies(message, context: ContextTypes.DEFAULT_TYPE, days: 
         return
 
     confirm_kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Переобрати категорії пошуку", callback_data=CB_RESELECT_CATS)],
         [
             InlineKeyboardButton("❌ Ні",  callback_data=CB_CONFIRM_NO),
             InlineKeyboardButton("✅ Так", callback_data=f"{CB_CONFIRM_YES}{days if days is not None else 'all'}"),
         ],
+        [InlineKeyboardButton("🔄 Переобрати категорії пошуку", callback_data=CB_RESELECT_CATS)],
     ])
     msg = await message.reply_text(
         summary + "\n\n❓ <b>Показати вакансії?</b>",
@@ -439,11 +459,11 @@ async def show_vacancies(update: Update, context: ContextTypes.DEFAULT_TYPE, day
         return
 
     confirm_kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Переобрати категорії пошуку", callback_data=CB_RESELECT_CATS)],
         [
             InlineKeyboardButton("❌ Ні",  callback_data=CB_CONFIRM_NO),
             InlineKeyboardButton("✅ Так", callback_data=f"{CB_CONFIRM_YES}{days if days is not None else 'all'}"),
         ],
+        [InlineKeyboardButton("🔄 Переобрати категорії пошуку", callback_data=CB_RESELECT_CATS)],
     ])
     await query.edit_message_text(
         summary + "\n\n❓ <b>Показати вакансії?</b>",
@@ -754,7 +774,8 @@ async def favs_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     ids = await _send_vacancies(
-        query.message.chat, fav_vacancies, context, user_id, force_favorite=True
+        query.message.chat, fav_vacancies, context, user_id,
+        force_favorite=True, from_favorites=True,
     )
     track(context, *ids)
     msg = await query.message.chat.send_message(
@@ -764,6 +785,30 @@ async def favs_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def favs_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_reply_markup(reply_markup=None)
+    msg = await query.message.reply_text("⏰ Часікі тікають!")
+    track(context, msg.message_id)
+
+
+async def fav_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Видаляє вакансію з обраних при перегляді списку."""
+    query = update.callback_query
+    await query.answer("🗑 Видалено з обраних")
+    short_link = query.data[len(CB_FAV_DELETE):]
+    favs = get_favorites(context, query.from_user.id)
+    favs.pop(short_link, None)
+    set_favorites(context, query.from_user.id, favs)
+    # Залишаємо тільки кнопку "Відкрити вакансію"
+    try:
+        open_btn = query.message.reply_markup.inline_keyboard[0][0]
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([[open_btn]]))
+    except Exception:
+        await query.edit_message_reply_markup(reply_markup=None)
+
+
+
     query = update.callback_query
     await query.answer()
     await query.edit_message_reply_markup(reply_markup=None)
@@ -853,6 +898,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(restore_vacancy,       pattern=f"^{CB_RESTORE}"))
     app.add_handler(CallbackQueryHandler(add_to_favorites,      pattern=f"^{CB_FAVORITE}"))
     app.add_handler(CallbackQueryHandler(remove_from_favorites, pattern=f"^{CB_UNFAVORITE}"))
+    app.add_handler(CallbackQueryHandler(fav_delete,            pattern=f"^{CB_FAV_DELETE}"))
     app.add_handler(CallbackQueryHandler(favs_yes,              pattern=f"^{CB_FAVS_YES}$"))
     app.add_handler(CallbackQueryHandler(favs_no,               pattern=f"^{CB_FAVS_NO}$"))
     app.add_handler(MessageHandler(
