@@ -60,7 +60,7 @@ Telegram-бот для пошуку IT/Defence-tech вакансій з брон
 - 📍 Місце роботи
 - 💰 Зарплата
 - 📅 Дата публікації (формат: "20 липня 2026")
-- 🌐 Сайт-джерело
+- 🌐 Фільтр (джерело + категорія)
 
 **Кнопки під вакансією:**
 - 🔗 Відкрити вакансію
@@ -119,26 +119,28 @@ deftech-jobs-bot/
 Для кожної обраної категорії — 4 RSS-ендпоінти:
 
 ```
-Deftech DOU {кат}    → jobs.dou.ua/vacancies/feeds/?category={кат}&search=miltech
-DOU {кат}            → jobs.dou.ua/vacancies/feeds/?category={кат}&search=бронювання
-Deftech Djinni {кат} → djinni.co/jobs/rss/?all_keywords={кат}&editorial=miltech
-Djinni {кат}         → djinni.co/jobs/rss/?all_keywords={кат}&editorial=reservation
+DOU Deftech {кат}          → jobs.dou.ua/vacancies/feeds/?category={кат}&search=miltech
+DOU (бронювання) {кат}     → jobs.dou.ua/vacancies/feeds/?category={кат}&search=бронювання
+Djinni Deftech {кат}       → djinni.co/jobs/rss/?all_keywords={кат}&editorial=miltech
+Djinni (бронювання) {кат}  → djinni.co/jobs/rss/?all_keywords={кат}&editorial=reservation
 ```
+
+Ці ж назви показуються в полі "🌐 Фільтр" під кожною вакансією.
 
 Приклад: 2 категорії → 8 запитів → 2 фінальних списки.
 Приклад: 4 категорії → 16 запитів → 4 фінальних списки.
 
 ### Алгоритм злиття (двоетапний, для кожної категорії)
 
-**Етап 1:**
+**Етап 1** (у межах одного сайту, дублікат = той самий URL):
 ```
-Deftech Djinni {кат} + Djinni {кат}  →  Temp Djinni {кат}
-Deftech DOU {кат}    + DOU {кат}     →  Temp DOU {кат}
+Djinni Deftech {кат} + Djinni (бронювання) {кат}  →  Temp Djinni {кат}
+DOU Deftech {кат}    + DOU (бронювання) {кат}     →  Temp DOU {кат}
 ```
 
-**Етап 2** (пріоритет Djinni — при збігу видаляється з DOU):
+**Етап 2** (DOU з пріоритетом — при збігу видаляється з Djinni; порівняння по title+company):
 ```
-Temp Djinni {кат} + Temp DOU {кат}  →  Final {кат} (MergedSource)
+Temp DOU {кат} + Temp Djinni {кат}  →  Final {кат} (MergedSource)
 ```
 
 ### Дедуплікація

@@ -59,6 +59,8 @@ CB_FAVS_YES      = "favs_yes"
 CB_FAVS_NO       = "favs_no"
 CB_CAT_TOGGLE    = "cat_toggle:"    # cat_toggle:<категорія>
 CB_CAT_CONFIRM   = "cat_confirm"    # підтвердити вибір категорій
+CB_CAT_PAGE      = "cat_page:"      # cat_page:<номер сторінки>
+CB_NOOP          = "noop"           # кнопка-індикатор сторінки, нічого не робить
 CB_RESELECT_CATS = "reselect_cats"  # повернутися до вибору категорій
 
 # ── Тексти кнопок Reply Keyboard ──────────────────────────────────────────────
@@ -138,20 +140,41 @@ def set_user_categories(context: ContextTypes.DEFAULT_TYPE, user_id: int, cats: 
     context.bot_data[_cat_key(user_id)] = cats
 
 
-def build_category_keyboard(selected: list[str]) -> InlineKeyboardMarkup:
-    """Клавіатура вибору категорій — по 2 в рядку, кнопка підтвердження окремо."""
+CATEGORIES_PER_PAGE = 10  # 5 рядків по 2 — забагато категорій, щоб влізти на один екран
+MAX_SELECTED_CATEGORIES = 5  # більше — забагато RSS-запитів і занадто широке зведення
+
+def build_category_keyboard(selected: list[str], page: int = 0) -> InlineKeyboardMarkup:
+    """Клавіатура вибору категорій — по 2 в рядку, з пагінацією (їх забагато для
+    одного екрана) і кнопкою підтвердження окремо. Позначки (✅/⬜) зберігаються
+    при переході між сторінками, бо стан вибору не залежить від поточної сторінки."""
     cats = AVAILABLE_CATEGORIES
+    total_pages = max(1, (len(cats) + CATEGORIES_PER_PAGE - 1) // CATEGORIES_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * CATEGORIES_PER_PAGE
+    page_cats = cats[start:start + CATEGORIES_PER_PAGE]
+
     rows = []
     # По 2 категорії в рядку
-    for i in range(0, len(cats), 2):
+    for i in range(0, len(page_cats), 2):
         row = []
-        for cat in cats[i:i+2]:
+        for cat in page_cats[i:i+2]:
             mark = "✅" if cat in selected else "⬜"
             row.append(InlineKeyboardButton(
                 f"{mark} {cat}",
                 callback_data=f"{CB_CAT_TOGGLE}{cat}",
             ))
         rows.append(row)
+
+    # Навігація по сторінках — тільки якщо сторінок більше однієї
+    if total_pages > 1:
+        nav_row = []
+        if page > 0:
+            nav_row.append(InlineKeyboardButton("◀️", callback_data=f"{CB_CAT_PAGE}{page - 1}"))
+        nav_row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=CB_NOOP))
+        if page < total_pages - 1:
+            nav_row.append(InlineKeyboardButton("▶️", callback_data=f"{CB_CAT_PAGE}{page + 1}"))
+        rows.append(nav_row)
+
     # Кнопка підтвердження — тільки якщо щось обрано
     if selected:
         rows.append([InlineKeyboardButton(
@@ -275,7 +298,7 @@ def format_vacancy(vacancy: Vacancy, num: int = 0) -> str:
     if salary and salary != "не вказано":
         lines.append(f"💰 <b>Зарплата:</b> {html.escape(salary)}")
     lines.append(f"📅 <b>Дата публікації:</b> {html.escape(format_date_ua(vacancy.published))}")
-    lines.append(f"🌐 <b>Сайт:</b> {html.escape(vacancy.source)}")
+    lines.append(f"🌐 <b>Фільтр:</b> {html.escape(vacancy.source)}")
     return "\n".join(lines)
 
 def pluralize_ua(n: int, one: str, few: str, many: str) -> str:
@@ -328,7 +351,9 @@ def build_summary(sources: list[MergedSource], days: int | None, hidden_count: i
             lines.append(f"  • {ms.name} — {n_vac} {vacancies_word(n_vac)}")
         else:
             n_dup = ms.duplicates
-            dup = f" (видалено {n_dup} {duplicates_word(n_dup)})" if n_dup else ""
+            # Дублікати рахуються ще ДО фільтру по даті — якщо після фільтру
+            # нічого не лишилось (n_vac == 0), показувати їх тут нерелевантно.
+            dup = f" (видалено {n_dup} {duplicates_word(n_dup)})" if n_dup and n_vac else ""
             lines.append(f"  • {ms.name} — {n_vac} {vacancies_word(n_vac)}{dup}")
     return "\n".join(lines)
 
@@ -377,6 +402,7 @@ async def _send_vacancies(chat, pending: list[dict], context: ContextTypes.DEFAU
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     context.chat_data["start_message_id"] = update.message.message_id
+    context.chat_data["cat_page"] = 0
     set_user_categories(context, user_id, [])
 
     msg = await update.message.reply_text(
@@ -389,20 +415,50 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def toggle_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
     user_id = query.from_user.id
     cat = query.data[len(CB_CAT_TOGGLE):]
     selected = get_user_categories(context, user_id)
+
     if cat in selected:
         selected.remove(cat)
+        await query.answer()
+    elif len(selected) >= MAX_SELECTED_CATEGORIES:
+        await query.answer(
+            f"Ви можете обрати тільки {MAX_SELECTED_CATEGORIES} категорій одночасно",
+            show_alert=True,
+        )
+        return
     else:
         selected.append(cat)
+        await query.answer()
+
     set_user_categories(context, user_id, selected)
+    page = context.chat_data.get("cat_page", 0)
     await query.edit_message_text(
         category_status_text(selected),
         parse_mode=ParseMode.HTML,
-        reply_markup=build_category_keyboard(selected),
+        reply_markup=build_category_keyboard(selected, page),
     )
+
+
+async def change_category_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Перехід між сторінками вибору категорій (◀️/▶️) — вибір категорій не зникає."""
+    query = update.callback_query
+    await query.answer()
+    page = int(query.data[len(CB_CAT_PAGE):])
+    context.chat_data["cat_page"] = page
+    user_id = query.from_user.id
+    selected = get_user_categories(context, user_id)
+    await query.edit_message_text(
+        category_status_text(selected),
+        parse_mode=ParseMode.HTML,
+        reply_markup=build_category_keyboard(selected, page),
+    )
+
+
+async def noop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Кнопка-індикатор сторінки ("2/4") — просто нічого не робить."""
+    await update.callback_query.answer()
 
 
 async def confirm_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -630,6 +686,7 @@ async def reselect_categories(update: Update, context: ContextTypes.DEFAULT_TYPE
     selected = get_user_categories(context, user_id)
     # Очищаємо pending — при новому виборі категорій вакансії будуть перезавантажені
     context.chat_data.pop("pending_vacancies", None)
+    context.chat_data["cat_page"] = 0
     await query.edit_message_text(
         category_status_text(selected),
         parse_mode=ParseMode.HTML,
@@ -1043,6 +1100,7 @@ async def _do_clear_history(chat_id: int, current_id: int, context: ContextTypes
     # Скидаємо категорії юзера і повертаємось до вибору
     if user_id:
         set_user_categories(context, user_id, [])
+    context.chat_data["cat_page"] = 0
 
     msg = await context.bot.send_message(
         chat_id=chat_id,
@@ -1104,6 +1162,8 @@ def main() -> None:
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(toggle_category,       pattern=f"^{CB_CAT_TOGGLE}"))
     app.add_handler(CallbackQueryHandler(confirm_categories,    pattern=f"^{CB_CAT_CONFIRM}$"))
+    app.add_handler(CallbackQueryHandler(change_category_page,  pattern=f"^{CB_CAT_PAGE}"))
+    app.add_handler(CallbackQueryHandler(noop_callback,          pattern=f"^{CB_NOOP}$"))
     app.add_handler(CallbackQueryHandler(reselect_categories,   pattern=f"^{CB_RESELECT_CATS}$"))
     app.add_handler(CallbackQueryHandler(vacancies_1d,    pattern=f"^{CB_VAC_1D}$"))
     app.add_handler(CallbackQueryHandler(vacancies_14d,   pattern=f"^{CB_VAC_14D}$"))

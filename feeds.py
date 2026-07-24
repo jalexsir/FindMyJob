@@ -26,13 +26,22 @@ logger = logging.getLogger(__name__)
 REQUEST_TIMEOUT = 15
 GREEN, RESET = "\033[32m", "\033[0m"
 
-# Детальне логування RSS-запитів/парсингу/дедуплікації в консоль (включно з повним
-# дампом сирого RSS XML на кожен фід) — вмикай тільки для дебагу, бо на кожен
-# запит користувача це друкує в консоль десятки-сотні рядків і сповільнює відповідь.
+# Детальне логування RSS-запитів/парсингу в консоль (включно з повним дампом
+# сирого RSS XML на кожен фід) — вмикай тільки для дебагу, бо на кожен запит
+# користувача це друкує в консоль десятки-сотні рядків і сповільнює відповідь.
 DEBUG = False
+
+# Логування етапів дедуплікації: списки перед злиттям, які дублікати видалено
+# (і скільки) на кожному етапі, фінальний результат. Значно вужче й тихіше за
+# DEBUG вище — увімкнено за замовчуванням.
+DEBUG_DEDUP = True
 
 def _dprint(*args, **kwargs) -> None:
     if DEBUG:
+        print(*args, **kwargs)
+
+def _dedup_print(*args, **kwargs) -> None:
+    if DEBUG_DEDUP:
         print(*args, **kwargs)
 
 HEADERS = {
@@ -56,23 +65,78 @@ _SALARY_RE = _re.compile(
 # ── 8 сирих RSS-джерел ────────────────────────────────────────────────────────
 
 # ── Доступні категорії ────────────────────────────────────────────────────────
+# Список і DOU-слаги — з офіційного <select name="category"> на jobs.dou.ua/vacancies/.
+# Djinni-ключове слово — вільнотекстовий пошук (all_keywords); None означає, що
+# для цієї категорії Djinni-джерел немає взагалі (перевірено емпірично — або
+# нема адекватного відповідника, або ключове слово дає лише шум).
 
-AVAILABLE_CATEGORIES = ["Java", "Support", "Golang", "Integration"]
+# Найпопулярніші мови програмування — навмисно на початку списку (перші сторінки
+# вибору категорій у боті), решта — після них.
+AVAILABLE_CATEGORIES = [
+    "Python", "Java", "C++", "NET", "PHP", "Node.js", "Golang", "Rust",
+    "AI/ML", "Analyst", "Architect", "C-level", "Copywriter",
+    "Data Engineer", "Data Science", "Design", "DevOps", "Embedded",
+    "Engineering Manager", "ERP/CRM", "Front End", "Hardware",
+    "Marketing", "Product Manager", "Project Manager",
+    "QA", "SAP", "Security", "Support", "SysAdmin",
+    "Technical Writer", "Unity", "Unreal Engine",
+]
 
-DOU_CATEGORY_MAP   = {"Java": "Java", "Support": "Support", "Golang": "Golang", "Integration": "Integration"}
-DJINNI_KEYWORD_MAP = {"Java": "java", "Support": "support", "Golang": "golang", "Integration": "integration"}
+DOU_CATEGORY_MAP = {
+    "NET": ".NET", "AI/ML": "AI/ML", "Analyst": "Analyst", "Architect": "Architect",
+    "C++": "C++", "C-level": "C-level", "Copywriter": "Copywriter",
+    "Data Engineer": "Data Engineer", "Data Science": "Data Science", "Design": "Design",
+    "DevOps": "DevOps", "Embedded": "Embedded", "Engineering Manager": "Engineering Manager",
+    "ERP/CRM": "ERP/CRM", "Front End": "Front End", "Golang": "Golang", "Hardware": "Hardware",
+    "Java": "Java", "Marketing": "Marketing", "Node.js": "Node.js", "PHP": "PHP",
+    "Product Manager": "Product Manager", "Project Manager": "Project Manager",
+    "Python": "Python", "QA": "QA", "Rust": "Rust", "SAP": "SAP", "Security": "Security",
+    "Support": "Support", "SysAdmin": "SysAdmin", "Technical Writer": "Technical Writer",
+    "Unity": "Unity", "Unreal Engine": "Unreal Engine",
+}
+
+DJINNI_KEYWORD_MAP = {
+    "NET": ".net", "AI/ML": "ai/ml", "Analyst": "analyst", "Architect": "architect",
+    "C++": "c++", "C-level": None, "Copywriter": "copywriter",
+    "Data Engineer": "data engineer", "Data Science": "data science", "Design": "design",
+    "DevOps": "devops", "Embedded": "embedded", "Engineering Manager": "engineering manager",
+    "ERP/CRM": "erp", "Front End": "front end", "Golang": "golang", "Hardware": "hardware",
+    "Java": "java", "Marketing": "marketing", "Node.js": "node.js", "PHP": "php",
+    "Product Manager": "product manager", "Project Manager": "project manager",
+    "Python": "python", "QA": "qa", "Rust": "rust", "SAP": "sap", "Security": "security",
+    "Support": "support", "SysAdmin": "sysadmin", "Technical Writer": "technical writer",
+    "Unity": "unity", "Unreal Engine": "unreal engine",
+}
+
+
+# Назви джерел (використовуються і як ключі внутрішніх словників, і як значення
+# Vacancy.source — тобто те, що показується у полі "Фільтр" під кожною вакансією).
+def _dou_deftech_name(cat: str) -> str:
+    return f"DOU Deftech {cat}"
+
+def _dou_regular_name(cat: str) -> str:
+    return f"DOU (бронювання) {cat}"
+
+def _djinni_deftech_name(cat: str) -> str:
+    return f"Djinni Deftech {cat}"
+
+def _djinni_regular_name(cat: str) -> str:
+    return f"Djinni (бронювання) {cat}"
 
 
 def build_feeds_for_categories(categories: list[str]) -> dict[str, list[str]]:
-    """Будує RAW_FEEDS динамічно для обраних категорій."""
+    """Будує RAW_FEEDS динамічно для обраних категорій.
+    Якщо для категорії немає Djinni-ключа (DJINNI_KEYWORD_MAP -> None, напр.
+    "C-level") — Djinni-джерела для неї просто не додаються."""
     feeds: dict[str, list[str]] = {}
     for cat in categories:
-        dou_cat    = DOU_CATEGORY_MAP.get(cat, cat)
-        djinni_kw  = DJINNI_KEYWORD_MAP.get(cat, cat.lower())
-        feeds[f"Deftech DOU {cat}"]    = [f"https://jobs.dou.ua/vacancies/feeds/?category={dou_cat}&search=miltech"]
-        feeds[f"DOU {cat}"]            = [f"https://jobs.dou.ua/vacancies/feeds/?category={dou_cat}&search={quote('бронювання')}"]
-        feeds[f"Deftech Djinni {cat}"] = [f"https://djinni.co/jobs/rss/?all_keywords={djinni_kw}&search_type=basic-search&editorial=miltech"]
-        feeds[f"Djinni {cat}"]         = [f"https://djinni.co/jobs/rss/?all_keywords={djinni_kw}&search_type=basic-search&editorial=reservation"]
+        dou_cat   = DOU_CATEGORY_MAP.get(cat, cat)
+        djinni_kw = DJINNI_KEYWORD_MAP.get(cat, cat.lower())
+        feeds[_dou_deftech_name(cat)] = [f"https://jobs.dou.ua/vacancies/feeds/?category={dou_cat}&search=miltech"]
+        feeds[_dou_regular_name(cat)] = [f"https://jobs.dou.ua/vacancies/feeds/?category={dou_cat}&search={quote('бронювання')}"]
+        if djinni_kw:
+            feeds[_djinni_deftech_name(cat)] = [f"https://djinni.co/jobs/rss/?all_keywords={quote(djinni_kw)}&search_type=basic-search&editorial=miltech"]
+            feeds[_djinni_regular_name(cat)] = [f"https://djinni.co/jobs/rss/?all_keywords={quote(djinni_kw)}&search_type=basic-search&editorial=reservation"]
     return feeds
 
 
@@ -120,11 +184,6 @@ class MergedSource:
 
 # ── Парсери ───────────────────────────────────────────────────────────────────
 
-def _dedup_key(v: Vacancy) -> tuple[str, str]:
-    """Ключ дедуплікації: (title, company) без урахування регістру."""
-    return (v.title.strip().lower(), v.company.strip().lower())
-
-
 _HOMOGLYPH_MAP = str.maketrans({
     "С": "C", "с": "c", "Е": "E", "е": "e", "О": "O", "о": "o",
     "Р": "P", "р": "p", "Х": "X", "х": "x", "А": "A", "а": "a",
@@ -163,6 +222,7 @@ def _is_invalid_company(text: str, title: str = "") -> bool:
         "можливість", "де", "коли", "яка", "який", "яке", "які",
         "що", "як", "чим", "і", "та", "а", "чи", "або", "не", "це", "хто",
         "ваша", "ваш", "ваші", "наш", "наша", "наші", "наший",
+        "у", "в",  # "у нас"/"в нас вся команда..." — початок опису, не назва
         "основні", "необхідні", "вимоги", "обов'язки",
         "команда", "команди", "компанія", "компанії", "клієнта", "клієнт",
         "core", "what", "responsibilities", "requirements", "qualifications",
@@ -737,33 +797,26 @@ def _fetch_raw(categories: list[str] | None = None) -> tuple[dict[str, list[Vaca
     dups_per_source: dict[str, int] = {}
 
     for source_name, entries in fetched.items():
-        seen_full: set[tuple[str, str]] = set()
-        seen_full_titles: set[str] = set()  # титули з seen_full — для O(1) look-up
-        seen_title: set[str] = set()
+        # Всередині ОДНОГО сирого джерела дублікат — це буквально той самий URL
+        # (той самий запис міг прийти в RSS двічі); порівнюємо за посиланням.
+        seen_links: dict[str, Vacancy] = {}
         vacancies: list[Vacancy] = []
         inner_dups = 0
 
         for v in entries:
-            t = v.title.strip().lower()
-            c = v.company.strip().lower()
-            if not t:
+            if not v.link:
                 vacancies.append(v)
                 continue
-            if c:
-                if (t, c) not in seen_full:
-                    seen_full.add((t, c))
-                    seen_full_titles.add(t)
-                    vacancies.append(v)
-                else:
-                    inner_dups += 1
+            original = seen_links.get(v.link)
+            if original is None:
+                seen_links[v.link] = v
+                vacancies.append(v)
             else:
-                if t not in seen_title and t not in seen_full_titles:
-                    seen_title.add(t)
-                    vacancies.append(v)
-                else:
-                    inner_dups += 1
+                # Пари дублікатів тут НЕ логуємо навмисно — детальну інформацію
+                # про дублікати друкуємо тільки для фінального злиття в Final.
+                inner_dups += 1
 
-        _dprint(
+        _dedup_print(
             f"{GREEN}[FILTER] {source_name}: "
             f"{len(vacancies)} вак. | "
             f"дублікатів всередині: {inner_dups}{RESET}"
@@ -777,45 +830,78 @@ def _fetch_raw(categories: list[str] | None = None) -> tuple[dict[str, list[Vaca
 # ── Логування ─────────────────────────────────────────────────────────────────
 
 def _log_list(name: str, vacancies: list[Vacancy]) -> None:
-    _dprint(f"{GREEN}\n{'─'*60}\n📋 {name} ({len(vacancies)} вак.):{RESET}")
+    _dedup_print(f"{GREEN}\n{'─'*60}\n📋 {name} ({len(vacancies)} вак.):{RESET}")
     for i, v in enumerate(vacancies, 1):
-        _dprint(f"{GREEN}  {i:2}. title={v.title!r}, company={v.company!r}{RESET}")
+        _dedup_print(f"{GREEN}  {i:2}. title={v.title!r}, company={v.company!r}{RESET}")
     if not vacancies:
-        _dprint(f"{GREEN}  (порожній){RESET}")
+        _dedup_print(f"{GREEN}  (порожній){RESET}")
+
+
+def _log_duplicate_pair(context_label: str, kept: Vacancy, removed: Vacancy) -> None:
+    """Логує ОБИДВІ вакансії пари-дубліката (з посиланнями) ще до видалення."""
+    _dedup_print(
+        f"{GREEN}  ✂ ДУБЛІКАТ {context_label}:\n"
+        f"      залишено: title={kept.title!r}, company={kept.company!r}, link={kept.link}\n"
+        f"      видалено: title={removed.title!r}, company={removed.company!r}, link={removed.link}"
+        f"{RESET}"
+    )
 
 
 # ── Злиття з дедуплікацією ────────────────────────────────────────────────────
 
-def _dedup_key_flexible(v: Vacancy) -> tuple[str, str]:
-    """Ключ дедуплікації: якщо company порожній — тільки title."""
-    title = v.title.strip().lower()
-    company = v.company.strip().lower()
-    return (title, company)  # ("title", "") теж унікальний ключ для порівняння по title
 
-
-def _merge(name: str, primary: list[Vacancy], secondary: list[Vacancy]) -> tuple[list[Vacancy], int]:
+def _merge(name: str, primary: list[Vacancy], secondary: list[Vacancy], by: str = "title_company") -> tuple[list[Vacancy], int]:
     """Об'єднує два списки. При збігу — видаляє з secondary.
-    Правило: якщо обидва title і company заповнені — порівнюємо по (title, company).
-    Якщо company порожній — порівнюємо тільки по title.
+
+    by="link" — дублікат визначається за ПОВНИМ посиланням. Для злиття
+        Deftech-варіанту зі "звичайним" В МЕЖАХ ОДНОГО САЙТУ (Deftech DOU + DOU,
+        Deftech Djinni + Djinni) — там та сама вакансія має буквально той самий URL.
+
+    by="title_company" (за замовчуванням) — якщо є і title, і company —
+        порівнюємо по парі; якщо company порожній — тільки по title. Для
+        фінального злиття DOU з Djinni — це РІЗНІ сайти з різними URL, тож
+        навіть та сама вакансія матиме різні посилання, порівнювати їх марно.
     """
-    # Будуємо seen з primary
-    seen_full: set[tuple[str, str]] = set()   # (title, company) де company не порожній
-    seen_full_titles: set[str] = set()          # титули з seen_full — для O(1) look-up
-    seen_title: set[str] = set()               # тільки title де company порожній
+    _dedup_print(f"{GREEN}\n[MERGE → {name}] primary={len(primary)}, secondary={len(secondary)}{RESET}")
+
+    if by == "link":
+        # Пари дублікатів тут НЕ логуємо навмисно — детальну інформацію про
+        # дублікати (title/company/link) друкуємо тільки для фінального злиття
+        # в Final (див. нижче, by="title_company"), щоб не дублювати шум.
+        seen_links: dict[str, Vacancy] = {v.link: v for v in primary if v.link}
+        unique_secondary: list[Vacancy] = []
+        duplicates = 0
+        for v in secondary:
+            original = seen_links.get(v.link) if v.link else None
+            if original is not None:
+                duplicates += 1
+            else:
+                if v.link:
+                    seen_links[v.link] = v
+                unique_secondary.append(v)
+        combined = primary + unique_secondary
+        _dedup_print(f"{GREEN}  ✅ {len(combined)} вак. (видалено {duplicates}){RESET}")
+        return combined, duplicates
+
+    # by == "title_company" — існуючі правила, без змін.
+    # Будуємо seen з primary. Значення — сама вакансія (не просто ключ), щоб при
+    # виявленні дубліката залогувати ОБИДВІ вакансії разом з посиланнями.
+    seen_full: dict[tuple[str, str], Vacancy] = {}   # (title, company) де company не порожній
+    seen_full_titles: dict[str, Vacancy] = {}          # титули з seen_full — для O(1) look-up
+    seen_title: dict[str, Vacancy] = {}               # тільки title де company порожній
 
     for v in primary:
         t = v.title.strip().lower()
         c = v.company.strip().lower()
         if t and c:
-            seen_full.add((t, c))
-            seen_full_titles.add(t)
+            seen_full[(t, c)] = v
+            seen_full_titles[t] = v
         elif t:
-            seen_title.add(t)
+            seen_title[t] = v
 
-    unique_secondary: list[Vacancy] = []
+    unique_secondary = []
     duplicates = 0
 
-    _dprint(f"{GREEN}\n[MERGE → {name}] primary={len(primary)}, secondary={len(secondary)}{RESET}")
     for v in secondary:
         t = v.title.strip().lower()
         c = v.company.strip().lower()
@@ -825,29 +911,28 @@ def _merge(name: str, primary: list[Vacancy], secondary: list[Vacancy]) -> tuple
             unique_secondary.append(v)
             continue
 
-        is_dup = False
+        original: Vacancy | None = None
         if c:
             # Є і title і company — порівнюємо по парі
             if (t, c) in seen_full:
-                is_dup = True
+                original = seen_full[(t, c)]
             else:
-                seen_full.add((t, c))
-                seen_full_titles.add(t)
+                seen_full[(t, c)] = v
+                seen_full_titles[t] = v
         else:
             # company порожній — порівнюємо тільки по title
-            if t in seen_title or t in seen_full_titles:
-                is_dup = True
-            else:
-                seen_title.add(t)
+            original = seen_title.get(t) or seen_full_titles.get(t)
+            if original is None:
+                seen_title[t] = v
 
-        if is_dup:
-            _dprint(f"{GREEN}  ✂ ДУБЛІКАТ: title={v.title!r}, company={v.company!r}{RESET}")
+        if original is not None:
+            _log_duplicate_pair(f"У {name}", original, v)
             duplicates += 1
         else:
             unique_secondary.append(v)
 
     combined = primary + unique_secondary
-    _dprint(f"{GREEN}  ✅ {len(combined)} вак. (видалено {duplicates}){RESET}")
+    _dedup_print(f"{GREEN}  ✅ {len(combined)} вак. (видалено {duplicates}){RESET}")
     return combined, duplicates
 
 
@@ -855,101 +940,107 @@ def _merge(name: str, primary: list[Vacancy], secondary: list[Vacancy]) -> tuple
 # ── Кеш результатів фетчу ─────────────────────────────────────────────────────
 # Клік по кнопці меню ("Всі вакансії" тощо) раніше завжди означав повний ре-фетч
 # усіх RSS-джерел з нуля. TTL-кеш дозволяє повторним запитам (той самий набір
-# категорій + період) у межах CACHE_TTL_SECONDS віддавати вже готовий результат.
+# категорій) у межах CACHE_TTL_SECONDS віддавати вже готовий результат Етапу 1
+# (без фільтру по даті — сам фільтр і Етап 2 рахуються щоразу наново, дешево,
+# без мережі, див. fetch_all_vacancies).
 CACHE_TTL_SECONDS = 120
 _cache_lock = threading.Lock()
-_vacancies_cache: dict[tuple, tuple[float, list["MergedSource"]]] = {}
-
-
-def _clone_merged_sources(sources: list[MergedSource]) -> list[MergedSource]:
-    """Копія списку MergedSource з новими списками vacancies — виклики нижче за
-    течією (bot.py) фільтрують ms.vacancies по-своєму (напр. прибирають приховані),
-    тож зі спільного кешу треба віддавати незалежні списки, а не той самий об'єкт."""
-    return [
-        MergedSource(name=ms.name, vacancies=list(ms.vacancies),
-                     total_before=ms.total_before, duplicates=ms.duplicates)
-        for ms in sources
-    ]
-
-
-def _apply_date_filter(sources: list[MergedSource], days: int | None) -> list[MergedSource]:
-    """Застосовує фільтр по даті ПІСЛЯ фетчу/злиття — так "1 день", "7 днів" і
-    "весь час" завжди рахуються з ОДНОГО спільного знімка фіду (кеш нижче не
-    залежить від days), а не з окремих живих запитів, зроблених у різний момент —
-    інакше вони можуть розходитись, якщо стрічка змінилась між запитами."""
-    if days is None:
-        return sources
-    cutoff = _date_cutoff(days)
-    for ms in sources:
-        ms.vacancies = [v for v in ms.vacancies if _passes_date(v, cutoff)]
-    return sources
+_vacancies_cache: dict[tuple, tuple[float, dict[str, dict[str, list["Vacancy"]]]]] = {}
 
 
 def fetch_all_vacancies(days: int | None = None, categories: list[str] | None = None) -> list[MergedSource]:
     """Двоетапне злиття для обраних категорій (з TTL-кешем, див. CACHE_TTL_SECONDS).
-    Кеш і сам фетч — БЕЗ фільтру по даті; дата застосовується окремо на льоту,
-    щоб усі часові вікна ділили один і той самий знімок фіду."""
+
+    ВАЖЛИВО щодо порядку операцій (щоб "видалено N дублікатів" ніколи не
+    перевищувало кількість показаних вакансій):
+      1. Кешується/фетчиться лише ЕТАП 1 (внутрішньосайтове злиття за
+         посиланням, до Temp Djinni/Temp DOU) — БЕЗ фільтру по даті, тож усі
+         часові вікна (1 день/7 днів/весь час) ділять один і той самий знімок фіду.
+      2. Temp Djinni/Temp DOU обрізаються по даті (для конкретного запиту).
+      3. І ЛИШЕ ПОТІМ — Етап 2 (фінальне злиття DOU+Djinni за title/company) —
+         на вже дато-обрізаних списках. Кількість видалених дублікатів рахується
+         саме тут, тож вона завжди узгоджена з тим, що реально показано.
+    """
     active_cats = categories or AVAILABLE_CATEGORIES
     cache_key = tuple(sorted(active_cats))
 
     with _cache_lock:
         cached = _vacancies_cache.get(cache_key)
         if cached and (time.monotonic() - cached[0]) < CACHE_TTL_SECONDS:
-            merged_sources = cached[1]
+            stage1 = cached[1]
+            from_cache = True
         else:
-            merged_sources = None
+            stage1 = None
+            from_cache = False
 
-    if merged_sources is None:
-        merged_sources = _fetch_all_vacancies_uncached(active_cats)
+    if stage1 is None:
+        stage1 = _fetch_all_vacancies_uncached(active_cats)
         with _cache_lock:
-            _vacancies_cache[cache_key] = (time.monotonic(), merged_sources)
+            _vacancies_cache[cache_key] = (time.monotonic(), stage1)
 
-    return _apply_date_filter(_clone_merged_sources(merged_sources), days)
+    period = f"останні {days} д." if days is not None else "весь час"
+    tag = "з кешу" if from_cache else "живий фетч"
+    _dedup_print(f"{GREEN}\n{'='*60}\nЕТАП 2 ({tag}, {period})\n{'='*60}{RESET}")
+
+    cutoff = _date_cutoff(days)
+    result: list[MergedSource] = []
+
+    for cat in active_cats:
+        entry = stage1.get(cat, {"temp_djinni": [], "temp_dou": []})
+        if days is None:
+            temp_djinni, temp_dou = entry["temp_djinni"], entry["temp_dou"]
+        else:
+            temp_djinni = [v for v in entry["temp_djinni"] if _passes_date(v, cutoff)]
+            temp_dou    = [v for v in entry["temp_dou"] if _passes_date(v, cutoff)]
+
+        # DOU primary (пріоритет), Djinni secondary — різні сайти, різні URL
+        # навіть для тієї самої вакансії, тож порівнюємо за (title, company).
+        final, duplicates = _merge(f"Final {cat}", temp_dou, temp_djinni)
+        _log_list(f"Final {cat}", final)
+
+        result.append(MergedSource(
+            name=f"{cat} (з бронюванням)",
+            vacancies=final,
+            total_before=len(temp_djinni) + len(temp_dou),
+            duplicates=duplicates,
+        ))
+
+    return result
 
 
-def _fetch_all_vacancies_uncached(active_cats: list[str]) -> list[MergedSource]:
+def _fetch_all_vacancies_uncached(active_cats: list[str]) -> dict[str, dict[str, list[Vacancy]]]:
+    """Етап 0 (сирі дані) + Етап 1 (внутрішньосайтове злиття за посиланням).
+    Повертає {cat: {"temp_djinni": [...], "temp_dou": [...]}} — БЕЗ фільтру по
+    даті й БЕЗ фінального злиття (Етап 2 робиться пізніше, вже на льоту, в
+    fetch_all_vacancies — після обрізання по даті)."""
     raw, dups_per_source = _fetch_raw(categories=active_cats)
 
-    _dprint(f"{GREEN}\n{'='*60}\nЕТАП 0: Сирі дані\n{'='*60}{RESET}")
+    _dedup_print(f"{GREEN}\n{'='*60}\nЕТАП 0: Сирі дані\n{'='*60}{RESET}")
     for name, vacancies in raw.items():
         _log_list(name, vacancies)
 
-    merged_sources: list[MergedSource] = []
+    stage1: dict[str, dict[str, list[Vacancy]]] = {}
 
     for cat in active_cats:
-        _dprint(f"{GREEN}\n{'='*60}\nЗЛИТТЯ: {cat}\n{'='*60}{RESET}")
+        _dedup_print(f"{GREEN}\n{'='*60}\nЗЛИТТЯ (Етап 1): {cat}\n{'='*60}{RESET}")
 
-        temp_djinni, djinni_stage1_dups = _merge(f"Temp Djinni {cat}",
-            raw.get(f"Deftech Djinni {cat}", []),
-            raw.get(f"Djinni {cat}", []))
-        temp_dou, dou_stage1_dups = _merge(f"Temp DOU {cat}",
-            raw.get(f"Deftech DOU {cat}", []),
-            raw.get(f"DOU {cat}", []))
+        # У межах ОДНОГО сайту (Deftech-варіант + звичайний) — дублікат це той
+        # самий URL, порівнюємо за посиланням.
+        temp_djinni, _ = _merge(f"Temp Djinni {cat}",
+            raw.get(_djinni_deftech_name(cat), []),
+            raw.get(_djinni_regular_name(cat), []), by="link")
+        temp_dou, _ = _merge(f"Temp DOU {cat}",
+            raw.get(_dou_deftech_name(cat), []),
+            raw.get(_dou_regular_name(cat), []), by="link")
+
+        for v in temp_djinni:
+            v.category = cat
+        for v in temp_dou:
+            v.category = cat
 
         _log_list(f"Temp Djinni {cat}", temp_djinni)
         _log_list(f"Temp DOU {cat}",    temp_dou)
 
-        # Етап 2: DOU primary (пріоритет), Djinni secondary — дублікати видаляються з Djinni
-        final, merge_dups = _merge(f"Final {cat}", temp_dou, temp_djinni)
-        for v in final:
-            v.category = cat
-        _log_list(f"Final {cat}", final)
+        stage1[cat] = {"temp_djinni": temp_djinni, "temp_dou": temp_dou}
 
-        # Загальна кількість дублікатів = всередині джерел (fetch_raw) +
-        # Етап 1 (Temp Djinni + Temp DOU мержі) + Етап 2 (фінальний мерж)
-        inner_dups = (
-            dups_per_source.get(f"Deftech Djinni {cat}", 0) +
-            dups_per_source.get(f"Djinni {cat}", 0) +
-            dups_per_source.get(f"Deftech DOU {cat}", 0) +
-            dups_per_source.get(f"DOU {cat}", 0)
-        )
-        total_dups = inner_dups + djinni_stage1_dups + dou_stage1_dups + merge_dups
-
-        merged_sources.append(MergedSource(
-            name=f"{cat} (з бронюванням)",
-            vacancies=final,
-            total_before=len(temp_djinni) + len(temp_dou),
-            duplicates=total_dups,
-        ))
-
-    return merged_sources
+    return stage1
