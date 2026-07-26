@@ -146,7 +146,7 @@ class HiddenHandlers(HandlerGroup):
 
     async def send_prompt(self, chat, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Крок 1: тільки кількість + кнопка підтвердження, без завантаження карток."""
-        session = self.session(context)
+        session = self.session(update, context)
         hidden = self._hidden_for_current_categories(update, context)
         if not hidden:
             message = await chat.send_message(texts.MSG_HIDDEN_EMPTY)
@@ -163,7 +163,7 @@ class HiddenHandlers(HandlerGroup):
 
     async def send_list(self, chat, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Крок 2: власне картки вилучених вакансій (після підтвердження)."""
-        session = self.session(context)
+        session = self.session(update, context)
         hidden = self._hidden_for_current_categories(update, context)
         if not hidden:
             message = await chat.send_message(texts.MSG_HIDDEN_EMPTY)
@@ -202,7 +202,7 @@ class HiddenHandlers(HandlerGroup):
             text = texts.MSG_HIDDEN_ALREADY_EMPTY
 
         message = await chat.send_message(text)
-        self.session(context).track(message.message_id)
+        self.session(update, context).track(message.message_id)
 
     # ── Допоміжне ────────────────────────────────────────────────────────────
 

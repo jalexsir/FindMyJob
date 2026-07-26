@@ -1,18 +1,24 @@
-"""Персистентне сховище (SQLite) для "Обране" та "Вилучені з пошуку".
+"""Персистентне сховище (SQLite).
 
-Точкове: знає лише про ці два списки, нічого не знає про решту структури
-bot_data (кеш показаних вакансій, seen-хеші, обрані категорії — це й далі
-живе тільки в пам'яті процесу й скидається при перезапуску).
+Зберігає лише те, що обов'язково має пережити перезапуск процесу:
 
-Стратегія: бот тримає hidden/favorites у bot_data (швидкий доступ у пам'яті), а
-при кожній зміні повністю перезаписує відповідні рядки таблиці для юзера.
-При старті все один раз підвантажується з БД у bot_data.
+* `hidden` / `favorites` — персональні списки вакансій;
+* `chat_state` — опорні точки для «Очистити листування» (без них після
+  рестарту бот не знає, з якого повідомлення починати видалення).
+
+Решта (кеш показаних вакансій, seen-хеші, обрані категорії) — похідні дані,
+які дешево відновити, тож вони свідомо живуть лише в пам'яті процесу.
+
+Стратегія для списків: бот тримає hidden/favorites у bot_data (швидкий доступ
+у пам'яті), а при кожній зміні повністю перезаписує відповідні рядки таблиці
+для юзера. При старті все один раз підвантажується з БД у bot_data.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
@@ -45,12 +51,38 @@ _COLUMNS = (
 )
 _INSERT_COLUMNS = ("user_id",) + _COLUMNS
 
+_CHAT_STATE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS chat_state (
+    chat_id                  INTEGER PRIMARY KEY,
+    first_tracked_message_id INTEGER,
+    start_message_id         INTEGER
+);
+"""
+
 _TABLE_HIDDEN = "hidden"
 _TABLE_FAVORITES = "favorites"
+_TABLE_CHAT_STATE = "chat_state"
+
+
+@dataclass(frozen=True)
+class ChatAnchors:
+    """Опорні точки чату для «Очистити листування».
+
+    Видалення йде суцільним діапазоном ID, тому достатньо запам'ятати два числа,
+    а не весь перелік надісланих повідомлень:
+
+    * `first_tracked_message_id` — найраніше повідомлення, яке ще треба прибрати
+      (нижня межа діапазону); None — відстежувати ще нема чого;
+    * `start_message_id` — повідомлення `/start`, яке слугує якорем і навмисно
+      переживає очищення.
+    """
+
+    first_tracked_message_id: int | None = None
+    start_message_id: int | None = None
 
 
 class VacancyStore:
-    """Доступ до SQLite-таблиць `hidden` і `favorites`."""
+    """Доступ до SQLite-таблиць `hidden`, `favorites` і `chat_state`."""
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -58,11 +90,13 @@ class VacancyStore:
     # ── Схема ────────────────────────────────────────────────────────────────
 
     def init_db(self) -> None:
+        """Створює таблиці, якщо їх ще немає. Безпечно на наявній БД."""
         with self._connect() as conn:
             conn.execute(_SCHEMA.format(table=_TABLE_HIDDEN))
             conn.execute(_SCHEMA.format(table=_TABLE_FAVORITES))
+            conn.execute(_CHAT_STATE_SCHEMA)
 
-    # ── Публічний API ────────────────────────────────────────────────────────
+    # ── Списки вакансій ──────────────────────────────────────────────────────
 
     def replace_hidden(self, user_id: int, data: UserRecords) -> None:
         self._replace_table(_TABLE_HIDDEN, user_id, data)
@@ -75,6 +109,31 @@ class VacancyStore:
 
     def load_all_favorites(self) -> AllRecords:
         return self._load_all(_TABLE_FAVORITES)
+
+    # ── Опорні точки чату ────────────────────────────────────────────────────
+
+    def load_chat_anchors(self, chat_id: int) -> ChatAnchors:
+        """Порожні опори для невідомого чату — це нормальний стан, не помилка."""
+        with self._connect() as conn:
+            row = conn.execute(
+                f"SELECT first_tracked_message_id, start_message_id "
+                f"FROM {_TABLE_CHAT_STATE} WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchone()
+        if row is None:
+            return ChatAnchors()
+        return ChatAnchors(first_tracked_message_id=row[0], start_message_id=row[1])
+
+    def save_chat_anchors(self, chat_id: int, anchors: ChatAnchors) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                f"INSERT INTO {_TABLE_CHAT_STATE} "
+                f"(chat_id, first_tracked_message_id, start_message_id) VALUES (?, ?, ?) "
+                f"ON CONFLICT(chat_id) DO UPDATE SET "
+                f"first_tracked_message_id = excluded.first_tracked_message_id, "
+                f"start_message_id = excluded.start_message_id",
+                (chat_id, anchors.first_tracked_message_id, anchors.start_message_id),
+            )
 
     # ── Внутрішні деталі ─────────────────────────────────────────────────────
 

@@ -103,7 +103,7 @@ class FavoriteHandlers(HandlerGroup):
 
     async def send_prompt(self, chat, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Показує кількість обраних і питає Так/Ні."""
-        session = self.session(context)
+        session = self.session(update, context)
         count = len(self.user_state(update, context).favorites)
         if not count:
             message = await chat.send_message(texts.MSG_FAVORITES_EMPTY)
@@ -123,7 +123,7 @@ class FavoriteHandlers(HandlerGroup):
         await query.answer()
         await query.edit_message_reply_markup(reply_markup=None)
 
-        session = self.session(context)
+        session = self.session(update, context)
         state = self.user_state(update, context)
         if not state.favorites:
             message = await query.message.reply_text(texts.MSG_FAVORITES_EMPTY_SHORT)
@@ -150,7 +150,7 @@ class FavoriteHandlers(HandlerGroup):
         await query.answer()
         await query.edit_message_reply_markup(reply_markup=None)
         message = await query.message.reply_text(texts.MSG_TICK_TOCK)
-        self.session(context).track(message.message_id)
+        self.session(update, context).track(message.message_id)
 
     async def _collect(self, state: UserState) -> list[dict]:
         """Повні дані обраних вакансій.

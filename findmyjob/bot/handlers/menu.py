@@ -60,7 +60,7 @@ class MenuHandlers(HandlerGroup):
         )
 
     async def handle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self.session(context).track(update.message.message_id)
+        self.session(update, context).track(update.message.message_id)
         action = self._routes.get(update.message.text)
         if action is not None:
             await action(update, context)

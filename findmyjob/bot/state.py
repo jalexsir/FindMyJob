@@ -13,9 +13,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from telegram import Update
 from telegram.ext import ContextTypes
 
-from findmyjob.storage import VacancyStore
+from findmyjob.storage import ChatAnchors, VacancyStore
 
 HIDDEN_KEY_PREFIX = "hidden_"
 FAVORITES_KEY_PREFIX = "favorites_"
@@ -119,27 +120,57 @@ class UserState:
 
 
 class ChatSession:
-    """Стан діалогу в межах чату: надіслані повідомлення й підготовлена вибірка."""
+    """Стан діалогу в межах чату: опорні точки очищення й підготовлена вибірка.
 
-    KEY_MESSAGE_IDS = "message_ids"
+    Опорні точки (`first_tracked_message_id`, `start_message_id`) переживають
+    перезапуск процесу — вони дублюються в таблицю `chat_state`. Решта
+    (підготовлена вибірка, сторінка категорій) — суто тимчасова і живе лише в
+    пам'яті.
+
+    Стан підвантажується з БД **ліниво**, при першому зверненні до чату: так ми
+    не читаємо всі чати на старті, а `Application.chat_data` у PTB і не дає
+    записати себе ззовні.
+    """
+
+    KEY_FIRST_TRACKED = "first_tracked_message_id"
+    KEY_START_MESSAGE_ID = "start_message_id"
     KEY_PENDING = "pending_vacancies"
     KEY_CATEGORY_PAGE = "cat_page"
-    KEY_START_MESSAGE_ID = "start_message_id"
+    KEY_ANCHORS_LOADED = "anchors_loaded"
 
-    def __init__(self, chat_data: dict[str, Any]) -> None:
+    def __init__(self, chat_data: dict[str, Any], chat_id: int, store: VacancyStore) -> None:
         self._chat_data = chat_data
+        self._chat_id = chat_id
+        self._store = store
+        self._load_anchors()
 
     # ── Відстеження повідомлень (для "Очистити листування") ──────────────────
+    # Видалення йде суцільним діапазоном ID, тож зберігати весь перелік
+    # надісланих повідомлень не треба — достатньо його нижньої межі. Це і
+    # прибирає необмежене зростання chat_data, і робить стан двома числами,
+    # які тривіально покласти в БД.
 
     def track(self, *message_ids: int) -> None:
-        self._chat_data.setdefault(self.KEY_MESSAGE_IDS, []).extend(message_ids)
+        """Опускає нижню межу діапазону, якщо повідомлення раніше за поточну."""
+        if not message_ids:
+            return
+        lowest = min(message_ids)
+        current = self.first_tracked_message_id
+        if current is not None and current <= lowest:
+            return
+        self._chat_data[self.KEY_FIRST_TRACKED] = lowest
+        self._save_anchors()
 
     @property
-    def tracked_message_ids(self) -> list[int]:
-        return self._chat_data.get(self.KEY_MESSAGE_IDS, [])
+    def first_tracked_message_id(self) -> int | None:
+        return self._chat_data.get(self.KEY_FIRST_TRACKED)
 
     def forget_tracked(self) -> None:
-        self._chat_data[self.KEY_MESSAGE_IDS] = []
+        """Скидає межу — усе, що було до цього, вже видалено."""
+        if self.first_tracked_message_id is None:
+            return
+        self._chat_data[self.KEY_FIRST_TRACKED] = None
+        self._save_anchors()
 
     @property
     def start_message_id(self) -> int | None:
@@ -147,7 +178,34 @@ class ChatSession:
 
     @start_message_id.setter
     def start_message_id(self, message_id: int) -> None:
+        if self.start_message_id == message_id:
+            return
         self._chat_data[self.KEY_START_MESSAGE_ID] = message_id
+        self._save_anchors()
+
+    # ── Персистентність опорних точок ────────────────────────────────────────
+
+    def _load_anchors(self) -> None:
+        if self._chat_data.get(self.KEY_ANCHORS_LOADED):
+            return
+        anchors = self._store.load_chat_anchors(self._chat_id)
+        self._chat_data.setdefault(self.KEY_FIRST_TRACKED, anchors.first_tracked_message_id)
+        self._chat_data.setdefault(self.KEY_START_MESSAGE_ID, anchors.start_message_id)
+        self._chat_data[self.KEY_ANCHORS_LOADED] = True
+
+    def _save_anchors(self) -> None:
+        """Викликається лише коли опора реально змінилась — це рідко.
+
+        На практиці: перше повідомлення в чаті, `/start` і по одному запису на
+        кожне очищення. Звичайне надсилання картки в БД не пише.
+        """
+        self._store.save_chat_anchors(
+            self._chat_id,
+            ChatAnchors(
+                first_tracked_message_id=self.first_tracked_message_id,
+                start_message_id=self.start_message_id,
+            ),
+        )
 
     # ── Сторінка вибору категорій ────────────────────────────────────────────
 
@@ -188,6 +246,6 @@ class StateRepository:
     def user(self, context: ContextTypes.DEFAULT_TYPE, user_id: int) -> UserState:
         return UserState(context.bot_data, user_id, self._store)
 
-    @staticmethod
-    def chat(context: ContextTypes.DEFAULT_TYPE) -> ChatSession:
-        return ChatSession(context.chat_data)
+    def chat(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> ChatSession:
+        chat = update.effective_chat
+        return ChatSession(context.chat_data, chat.id if chat else 0, self._store)
