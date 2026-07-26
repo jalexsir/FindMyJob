@@ -1,0 +1,231 @@
+"""Сценарій пошуку та показу вакансій."""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from datetime import date
+from typing import Sequence
+
+from telegram import Update
+from telegram.constants import ParseMode
+from telegram.ext import BaseHandler, CallbackQueryHandler, ContextTypes
+
+from findmyjob.bot import callbacks as cb
+from findmyjob.bot import texts
+from findmyjob.bot.formatting import build_summary
+from findmyjob.bot.keyboards import (
+    build_confirm_show_keyboard, build_no_vacancies_keyboard,
+)
+from findmyjob.bot.sending import VacancySender
+from findmyjob.bot.state import StateRepository, UserState
+from findmyjob.feeds import AVAILABLE_CATEGORIES, VacancyFeedService
+from findmyjob.models import Vacancy
+
+from .base import HandlerGroup
+
+ALL_TIME = "all"
+
+
+@dataclass(frozen=True)
+class VacancySelection:
+    """Готова до показу вибірка: текст зведення та скільки в ній вакансій."""
+
+    summary: str
+    total: int
+
+    @property
+    def is_empty(self) -> bool:
+        return self.total == 0
+
+
+class VacancyHandlers(HandlerGroup):
+    """Завантаження вакансій, зведення та показ карток після підтвердження."""
+
+    def __init__(
+        self,
+        states: StateRepository,
+        feeds: VacancyFeedService,
+        sender: VacancySender,
+        max_per_source: int,
+    ) -> None:
+        super().__init__(states)
+        self._feeds = feeds
+        self._sender = sender
+        self._max_per_source = max_per_source
+
+    def handlers(self) -> Sequence[BaseHandler]:
+        return (
+            CallbackQueryHandler(self.show_1d, pattern=cb.exact(cb.CB_VAC_1D)),
+            CallbackQueryHandler(self.show_14d, pattern=cb.exact(cb.CB_VAC_14D)),
+            CallbackQueryHandler(self.confirm_show, pattern=cb.prefixed(cb.CB_CONFIRM_YES)),
+            CallbackQueryHandler(self.decline_show, pattern=cb.exact(cb.CB_CONFIRM_NO)),
+        )
+
+    # ── Вхідні точки ─────────────────────────────────────────────────────────
+
+    async def request_from_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, days: int | None
+    ) -> None:
+        """Запит з кнопки Reply Keyboard: зведення надсилається новим повідомленням."""
+        message = update.message
+        session = self.session(context)
+
+        waiting = await message.reply_text(texts.MSG_LOADING)
+        session.track(waiting.message_id)
+
+        selection = await self._prepare(update, context, days)
+
+        # Прибираємо "зачекай..." і відправляємо результат новим повідомленням
+        try:
+            await context.bot.delete_message(
+                chat_id=message.chat_id, message_id=waiting.message_id
+            )
+        except Exception:
+            pass
+
+        text, keyboard = self._summary_message(selection, days)
+        answer = await message.reply_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=keyboard
+        )
+        session.track(answer.message_id)
+
+    async def show_1d(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._request_from_callback(update, context, days=1)
+
+    async def show_14d(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._request_from_callback(update, context, days=14)
+
+    async def _request_from_callback(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, days: int | None
+    ) -> None:
+        """Запит з інлайн-кнопки: зведення замінює саме повідомлення з кнопкою."""
+        query = update.callback_query
+        await query.answer()
+        self.session(context).track(query.message.message_id)
+        await query.edit_message_text(texts.MSG_LOADING)
+
+        selection = await self._prepare(update, context, days)
+        text, keyboard = self._summary_message(selection, days)
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+    # ── Підтвердження ────────────────────────────────────────────────────────
+
+    async def confirm_show(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Крок 2: показує вакансії, вже завантажені на кроці зведення (без ре-фетчу)."""
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_reply_markup(reply_markup=None)
+
+        session = self.session(context)
+        state = self.user_state(update, context)
+        pending = session.pending_vacancies
+
+        if not pending:
+            message = await query.message.reply_text(
+                texts.MSG_NO_VACANCIES, reply_markup=build_no_vacancies_keyboard()
+            )
+            session.track(message.message_id)
+            return
+
+        session.track(*await self._sender.send_all(query.message.chat, pending, state))
+
+        days = self._parse_days(cb.argument(query.data, cb.CB_CONFIRM_YES))
+        categories = ", ".join(state.categories or AVAILABLE_CATEGORIES)
+        count = len(pending)
+        message = await query.message.chat.send_message(
+            f"✅ Всі доступні вакансії {texts.period_phrase(days)} "
+            f"для категорій ({categories}) доступні для перегляду вище. "
+            f"({count} {texts.vacancies_word(count)})"
+        )
+        session.track(message.message_id)
+
+    async def decline_show(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        await query.answer()
+        session = self.session(context)
+        session.clear_pending()
+        await query.edit_message_reply_markup(reply_markup=None)
+        message = await query.message.reply_text(texts.MSG_MAYBE_LATER)
+        session.track(message.message_id)
+
+    # ── Ядро: завантаження й підготовка вибірки ──────────────────────────────
+
+    async def _prepare(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, days: int | None
+    ) -> VacancySelection:
+        """Фетчить вакансії, прибирає вилучені, впорядковує та кладе в сесію."""
+        state = self.user_state(update, context)
+        sources = await asyncio.to_thread(
+            self._feeds.fetch, days, state.categories or None
+        )
+
+        hidden_count = self._remove_hidden(sources, state)
+        vacancies = sorted(
+            (v for source in sources for v in source.vacancies), key=_publication_order
+        )
+        self.session(context).pending_vacancies = [v.to_dict() for v in vacancies]
+
+        return VacancySelection(
+            summary=build_summary(sources, days, hidden_count=hidden_count),
+            total=len(vacancies),
+        )
+
+    def _remove_hidden(self, sources, state: UserState) -> int:
+        """Вилучає приховані вакансії з вибірки. Повертає кількість вилучених.
+
+        Рахуємо саме УНІКАЛЬНІ вакансії (за short_link), а не скільки разів вони
+        трапилися у фетчі: та сама вакансія може знайтися одразу в кількох
+        категоріях (вони між собою не дедуплікуються), тож просте
+        "було мінус стало" задвоювало б лічильник.
+        """
+        hidden = state.hidden
+        removed: set[str] = set()
+        hidden_changed = False
+
+        for source in sources:
+            for vacancy in source.vacancies:
+                short_link = vacancy.short_link
+                if short_link not in hidden:
+                    continue
+                removed.add(short_link)
+                # Самозцілення: вакансія могла бути прихована з іншої категорії
+                # (категорії перетинаються) — тепер точно знаємо, що вона
+                # стосується і цієї теж, тож запам'ятовуємо.
+                categories = hidden[short_link].setdefault("categories", [])
+                if vacancy.category and vacancy.category not in categories:
+                    categories.append(vacancy.category)
+                    hidden_changed = True
+
+            source.vacancies = [
+                v for v in source.vacancies if v.short_link not in hidden
+            ][:self._max_per_source]
+
+        if hidden_changed:
+            state.save_hidden()
+        return len(removed)
+
+    # ── Допоміжне ────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _summary_message(selection: VacancySelection, days: int | None):
+        """Текст і клавіатура для повідомлення зі зведенням."""
+        if selection.is_empty:
+            return selection.summary, build_no_vacancies_keyboard()
+        return (
+            f"{selection.summary}\n\n{texts.MSG_SHOW_VACANCIES}",
+            build_confirm_show_keyboard(days),
+        )
+
+    @staticmethod
+    def _parse_days(raw: str) -> int | None:
+        return None if raw == ALL_TIME else int(raw)
+
+
+def _publication_order(vacancy: Vacancy) -> tuple[bool, date]:
+    """Сортування за датою: найстаріші зверху, найсвіжіші — останнім повідомленням.
+
+    Вакансії без визначеної дати йдуть у кінець, а не помилково на початок.
+    """
+    published_at = vacancy.publication_date()
+    return published_at is None, published_at or date.min

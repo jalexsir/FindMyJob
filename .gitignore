@@ -1,0 +1,11 @@
+# Секрети
+.env
+
+# Локальна БД (Обране / Вилучені) — персональні дані користувачів
+bot_storage.db
+bot_storage.db-wal
+bot_storage.db-shm
+
+# Python
+__pycache__/
+*.pyc

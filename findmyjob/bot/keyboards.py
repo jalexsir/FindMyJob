@@ -1,0 +1,172 @@
+"""Побудова клавіатур Telegram."""
+
+from __future__ import annotations
+
+from telegram import (
+    InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup,
+)
+
+from findmyjob.feeds import AVAILABLE_CATEGORIES
+from findmyjob.models import Vacancy
+
+from . import callbacks as cb
+from . import texts
+
+# Категорій забагато, щоб влізти на один екран — по 2 в рядку з пагінацією
+CATEGORIES_PER_PAGE = 10
+CATEGORIES_PER_ROW = 2
+# Більше — забагато RSS-запитів і занадто широке зведення
+MAX_SELECTED_CATEGORIES = 5
+
+
+def build_persistent_keyboard() -> ReplyKeyboardMarkup:
+    """Головне меню, що завжди видно внизу."""
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton(texts.BTN_VAC_1D),
+             KeyboardButton(texts.BTN_VAC_7D),
+             KeyboardButton(texts.BTN_VAC_ALL)],
+            [KeyboardButton(texts.BTN_SHOW_HIDDEN),
+             KeyboardButton(texts.BTN_FAVORITES)],
+            [KeyboardButton(texts.BTN_CLEAR),
+             KeyboardButton(texts.BTN_CLEAR_HIDE)],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+
+def build_category_keyboard(selected: list[str], page: int = 0) -> InlineKeyboardMarkup:
+    """Клавіатура вибору категорій із пагінацією.
+
+    Позначки (✅/⬜) зберігаються при переході між сторінками, бо стан вибору не
+    залежить від поточної сторінки.
+    """
+    total_pages = max(1, -(-len(AVAILABLE_CATEGORIES) // CATEGORIES_PER_PAGE))
+    page = max(0, min(page, total_pages - 1))
+    start = page * CATEGORIES_PER_PAGE
+    page_categories = AVAILABLE_CATEGORIES[start:start + CATEGORIES_PER_PAGE]
+
+    rows = [
+        [
+            InlineKeyboardButton(
+                f"{'✅' if category in selected else '⬜'} {category}",
+                callback_data=cb.payload(cb.CB_CAT_TOGGLE, category),
+            )
+            for category in page_categories[i:i + CATEGORIES_PER_ROW]
+        ]
+        for i in range(0, len(page_categories), CATEGORIES_PER_ROW)
+    ]
+
+    if total_pages > 1:
+        rows.append(_pagination_row(page, total_pages))
+
+    if selected:
+        rows.append([InlineKeyboardButton(
+            f"▶️ Продовжити ({len(selected)} обрано)",
+            callback_data=cb.CB_CAT_CONFIRM,
+        )])
+    return InlineKeyboardMarkup(rows)
+
+
+def _pagination_row(page: int, total_pages: int) -> list[InlineKeyboardButton]:
+    row = []
+    if page > 0:
+        row.append(InlineKeyboardButton("◀️", callback_data=cb.payload(cb.CB_CAT_PAGE, page - 1)))
+    row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=cb.CB_NOOP))
+    if page < total_pages - 1:
+        row.append(InlineKeyboardButton("▶️", callback_data=cb.payload(cb.CB_CAT_PAGE, page + 1)))
+    return row
+
+
+def build_vacancy_keyboard(vacancy: Vacancy, is_favorite: bool = False) -> InlineKeyboardMarkup:
+    """Клавіатура під карткою вакансії у звичайному списку."""
+    short_link = vacancy.short_link
+    favorite_button = InlineKeyboardButton(
+        texts.BTN_IN_FAVORITES if is_favorite else texts.BTN_ADD_FAVORITE,
+        callback_data=cb.payload(
+            cb.CB_UNFAVORITE if is_favorite else cb.CB_FAVORITE, short_link
+        ),
+    )
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_OPEN_VACANCY, url=vacancy.link)],
+        [favorite_button,
+         InlineKeyboardButton(texts.BTN_HIDE, callback_data=cb.payload(cb.CB_HIDE, short_link))],
+    ])
+
+
+def build_favorite_vacancy_keyboard(vacancy: Vacancy) -> InlineKeyboardMarkup:
+    """Клавіатура для вакансії зі списку Обраних — з кнопкою видалення."""
+    short_link = vacancy.short_link
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_OPEN_VACANCY, url=vacancy.link)],
+        [InlineKeyboardButton(texts.BTN_REMOVE_FAVORITE,
+                              callback_data=cb.payload(cb.CB_FAV_DELETE, short_link))],
+        [InlineKeyboardButton(texts.BTN_HIDE,
+                              callback_data=cb.payload(cb.CB_HIDE, short_link))],
+    ])
+
+
+def build_restore_keyboard(short_link: str) -> InlineKeyboardMarkup:
+    """Кнопка відновлення для картки зі списку вилучених."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_RESTORE,
+                              callback_data=cb.payload(cb.CB_RESTORE, short_link))],
+    ])
+
+
+def build_unhide_keyboard(short_link: str) -> InlineKeyboardMarkup:
+    """Кнопка повернення щойно прихованої вакансії до перегляду."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_RESTORE,
+                              callback_data=cb.payload(cb.CB_UNHIDE, short_link))],
+    ])
+
+
+def build_show_hidden_prompt_keyboard() -> InlineKeyboardMarkup:
+    """Підтвердження показу списку вилучених."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_SHOW_HIDDEN_LIST, callback_data=cb.CB_SHOW_HIDDEN)],
+    ])
+
+
+def build_no_vacancies_keyboard() -> InlineKeyboardMarkup:
+    """Клавіатура для "нічого не знайдено": глянути вилучені (спочатку кількість +
+    підтвердження) АБО переобрати категорії."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_SHOW_HIDDEN_LIST,
+                              callback_data=cb.CB_SHOW_HIDDEN_PROMPT)],
+        [InlineKeyboardButton(texts.BTN_RESELECT_CATS, callback_data=cb.CB_RESELECT_CATS)],
+    ])
+
+
+def build_confirm_show_keyboard(days: int | None) -> InlineKeyboardMarkup:
+    """Так/Ні під зведенням + можливість переобрати категорії."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_CONFIRM_NO),
+            InlineKeyboardButton(
+                texts.BTN_YES,
+                callback_data=cb.payload(cb.CB_CONFIRM_YES, days if days is not None else "all"),
+            ),
+        ],
+        [InlineKeyboardButton(texts.BTN_RESELECT_CATS, callback_data=cb.CB_RESELECT_CATS)],
+    ])
+
+
+def build_favorites_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_FAVS_NO),
+        InlineKeyboardButton(texts.BTN_YES, callback_data=cb.CB_FAVS_YES),
+    ]])
+
+
+def replace_button(
+    markup: InlineKeyboardMarkup, target_callback_data: str, replacement: InlineKeyboardButton
+) -> InlineKeyboardMarkup:
+    """Повертає копію клавіатури, де кнопку з заданим callback_data замінено."""
+    return InlineKeyboardMarkup([
+        [replacement if button.callback_data == target_callback_data else button
+         for button in row]
+        for row in markup.inline_keyboard
+    ])
