@@ -111,7 +111,7 @@ class FavoriteHandlers(HandlerGroup):
             return
 
         message = await chat.send_message(
-            f"⭐ <b>У списку Обраних вакансій є {count} {texts.vacancies_word(count)}.</b>"
+            f"⭐ <b>У списку Обраних є {count} {texts.vacancies_word(count)}.</b>"
             "\n\n❓ Показати їх?",
             parse_mode=ParseMode.HTML,
             reply_markup=build_favorites_confirm_keyboard(),
