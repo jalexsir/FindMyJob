@@ -79,12 +79,15 @@ class CategoryHandlers(HandlerGroup):
 
     async def confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
-        await query.answer()
 
         selected = self.user_state(update, context).categories
         if not selected:
+            # Відповідаємо на запит саме алертом: повторний answer() вже нічого
+            # не показав би, тому звичайного підтвердження вище бути не повинно.
             await query.answer(texts.MSG_PICK_AT_LEAST_ONE, show_alert=True)
             return
+
+        await query.answer()
 
         await query.edit_message_text(
             texts.categories_confirmed(selected), parse_mode=ParseMode.HTML
