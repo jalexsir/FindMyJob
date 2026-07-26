@@ -15,7 +15,7 @@ from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
 from findmyjob.bot.formatting import build_summary
 from findmyjob.bot.keyboards import (
-    build_confirm_show_keyboard, build_no_vacancies_keyboard,
+    build_category_keyboard, build_confirm_show_keyboard, build_no_vacancies_keyboard,
 )
 from findmyjob.bot.sending import VacancySender
 from findmyjob.bot.state import StateRepository, UserState
@@ -71,6 +71,10 @@ class VacancyHandlers(HandlerGroup):
         message = update.message
         session = self.session(context)
 
+        if not self.user_state(update, context).categories:
+            await self._prompt_categories(context, message.reply_text)
+            return
+
         waiting = await message.reply_text(texts.MSG_LOADING)
         session.track(waiting.message_id)
 
@@ -103,11 +107,32 @@ class VacancyHandlers(HandlerGroup):
         query = update.callback_query
         await query.answer()
         self.session(context).track(query.message.message_id)
+
+        if not self.user_state(update, context).categories:
+            self.session(context).category_page = 0
+            await query.edit_message_text(
+                texts.MSG_NO_CATEGORY_SELECTED, reply_markup=build_category_keyboard([])
+            )
+            return
+
         await query.edit_message_text(texts.MSG_LOADING)
 
         selection = await self._prepare(update, context, days)
         text, keyboard = self._summary_message(selection, days)
         await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+    async def _prompt_categories(self, context: ContextTypes.DEFAULT_TYPE, reply) -> None:
+        """Жодної категорії не обрано — просимо обрати зі списку замість пошуку.
+
+        Без цього фетч пішов би по всіх категоріях одразу (`categories or None`),
+        і користувач отримав би зведення, якого не замовляв.
+        """
+        session = self.session(context)
+        session.category_page = 0
+        message = await reply(
+            texts.MSG_NO_CATEGORY_SELECTED, reply_markup=build_category_keyboard([])
+        )
+        session.track(message.message_id)
 
     # ── Підтвердження ────────────────────────────────────────────────────────
 
