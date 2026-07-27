@@ -30,8 +30,8 @@ class HandlerGroup(ABC):
         user = update.effective_user
         return self._states.user(context, user.id if user else 0)
 
-    def session(self, context: ContextTypes.DEFAULT_TYPE) -> ChatSession:
-        return self._states.chat(context)
+    def session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> ChatSession:
+        return self._states.chat(update, context)
 
 
 def title_from_caption(caption: str | None) -> str:

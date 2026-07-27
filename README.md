@@ -138,6 +138,11 @@ Telegram-бот для пошуку IT / Defence-tech вакансій з бро
 Видаляє всі повідомлення діалогу (крім `/start`), скидає обрані категорії й
 повертає до кроку 1.
 
+**Переживає перезапуск бота.** Опорна точка (з якого повідомлення починати
+видалення) зберігається в SQLite, тож після оновлення на сервері чи рестарту
+`systemd` кнопка й далі прибирає всю історію, а не тільки те, що з'явилося
+після перезапуску. Деталі — [нижче](#очищення-листування).
+
 ---
 
 ## Швидкий старт
@@ -170,7 +175,7 @@ FindMyJob/
 ├── findmyjob/
 │   ├── config.py                 — Settings: читання .env, налаштування
 │   ├── models.py                 — Vacancy, MergedSource, хеші, дати
-│   ├── storage.py                — VacancyStore: SQLite (Обране / Вилучені)
+│   ├── storage.py                — VacancyStore: SQLite (списки + опори чату)
 │   ├── images.py                 — VacancyImageRenderer (Pillow)
 │   ├── feeds/                    — підсистема RSS
 │   │   ├── categories.py         — категорії, FeedSource, побудова URL
@@ -596,14 +601,18 @@ merge_by_title_and_company(name, primary, secondary) -> MergeResult
 `VacancyStore` (`findmyjob/storage.py`) — SQLite, файл `bot_storage.db`.
 
 ```python
-store.init_db()
+store.init_db()                          # CREATE TABLE IF NOT EXISTS ×3
+
 store.replace_hidden(user_id, data)      # data: {short_link: {...}}
 store.replace_favorites(user_id, data)
 store.load_all_hidden()    -> {user_id: {short_link: {...}}}
 store.load_all_favorites() -> {user_id: {short_link: {...}}}
+
+store.save_chat_anchors(chat_id, ChatAnchors(...))
+store.load_chat_anchors(chat_id) -> ChatAnchors
 ```
 
-Дві таблиці однакової схеми — `hidden` і `favorites`:
+Три таблиці. `hidden` і `favorites` — однакової схеми:
 
 ```sql
 CREATE TABLE IF NOT EXISTS hidden (
@@ -629,11 +638,38 @@ CREATE TABLE IF NOT EXISTS hidden (
 записів), а натомість неможливий розсинхрон між пам'яттю та БД: у таблиці
 завжди рівно те, що в `bot_data`.
 
+Третя таблиця — `chat_state`, опорні точки для «Очистити листування»:
+
+```sql
+CREATE TABLE IF NOT EXISTS chat_state (
+    chat_id                  INTEGER PRIMARY KEY,
+    first_tracked_message_id INTEGER,   -- нижня межа діапазону видалення
+    start_message_id         INTEGER    -- якір /start, переживає очищення
+);
+```
+
+```python
+@dataclass(frozen=True)
+class ChatAnchors:
+    first_tracked_message_id: int | None = None
+    start_message_id: int | None = None
+```
+
+Запис — через `INSERT ... ON CONFLICT(chat_id) DO UPDATE`, тобто один рядок на
+чат. Детальніше про те, чому двох чисел достатньо, — у розділі
+[«Очищення листування»](#очищення-листування).
+
+**Міграція не потрібна.** `init_db()` виконує `CREATE TABLE IF NOT EXISTS` для
+всіх трьох таблиць і є ідемпотентним: на наявній БД він лише додає `chat_state`,
+не чіпаючи `hidden` і `favorites`.
+
 **Увімкнено WAL** (`PRAGMA journal_mode = WAL`) — читання не блокує запис.
 
-**Персистентно зберігаються лише два списки.** Кеш показаних вакансій,
+**Персистентно зберігається лише необхідний мінімум.** Кеш показаних вакансій,
 seen-хеші й обрані категорії живуть тільки в пам'яті процесу й свідомо
-скидаються при перезапуску: це похідні дані, які дешево відновити.
+скидаються при перезапуску: це похідні дані, які дешево відновити. А от опорні
+точки чату відновити нізвідки — Telegram не віддає історію повідомлень, — тому
+вони в БД.
 
 `categories` — це **JSON-масив** усіх категорій, у яких бот бачив цю вакансію
 (не те саме, що `category` — категорія на момент першого показу). Див.
@@ -744,10 +780,11 @@ prefixed(CB_HIDE)              # "^hide:"       — дії з параметро
 | `bot_data["vcache_{uid}"]` | `dict[str, dict]` | Кеш повних даних показаних вакансій | у пам'яті |
 | `bot_data["seen_{uid}"]` | `set[str]` | Хеші переглянутих вакансій (мітка NEW) | у пам'яті |
 | `bot_data["categories_{uid}"]` | `list[str]` | Обрані категорії пошуку | у пам'яті |
-| `chat_data["message_ids"]` | `list[int]` | ID повідомлень для очищення | у пам'яті |
-| `chat_data["start_message_id"]` | `int` | ID повідомлення `/start` | у пам'яті |
+| `chat_data["first_tracked_message_id"]` | `int \| None` | Нижня межа діапазону очищення | **SQLite** |
+| `chat_data["start_message_id"]` | `int \| None` | ID повідомлення `/start` (якір) | **SQLite** |
 | `chat_data["pending_vacancies"]` | `list[dict]` | Вибірка між зведенням і показом | у пам'яті |
 | `chat_data["cat_page"]` | `int` | Поточна сторінка вибору категорій | у пам'яті |
+| `chat_data["anchors_loaded"]` | `bool` | Прапорець лінивої гідратації з БД | службовий |
 
 Доступ до цих ключів інкапсульовано у двох класах (`bot/state.py`) — напряму до
 `bot_data` / `chat_data` більше ніхто не звертається:
@@ -761,12 +798,21 @@ class UserState:      # per-user, ключі bot_data
     mark_seen(hashes) / set_categories(cats)
 
 class ChatSession:    # per-chat, ключі chat_data
-    track(*ids) / tracked_message_ids / forget_tracked()
-    start_message_id / category_page
+    track(*ids)                               # опускає нижню межу діапазону
+    first_tracked_message_id / forget_tracked()
+    start_message_id                          # сеттер одразу пише в SQLite
+    category_page
     pending_vacancies / clear_pending()
 ```
 
 `StateRepository` — фабрика: єдиний об'єкт, що знає про `VacancyStore`.
+`chat(update, context)` бере `chat_id` з `update.effective_chat`, бо сам
+`context.chat_data` свого ID не знає.
+
+**Лінива гідратація.** `ChatSession.__init__` при першому зверненні до чату
+читає опори з БД у `chat_data` і ставить прапорець `anchors_loaded`. Так ми
+не завантажуємо всі чати на старті — а PTB і не дав би: `Application.chat_data`
+віддається як read-only проксі, записати в нього ззовні неможливо.
 
 ---
 
@@ -838,7 +884,9 @@ PNG і сотня `sendPhoto`. Вибірка живе в `chat_data["pending_va
 ### Запасні шляхи після перезапуску
 
 Кеш вакансій живе в пам'яті, тож після рестарту бот може отримати `hide` або
-`fav` на вакансію, про яку вже нічого не знає. Передбачено два рівні:
+`fav` на вакансію, про яку вже нічого не знає. Передбачено два рівні
+(опорні точки очищення сюди не належать — вони в БД, див.
+[«Очищення листування»](#очищення-листування)):
 
 - `hide` / `fav` — назва витягується **з підпису вже надісланого повідомлення**
   (рядок із `«Спеціальність:»`)
@@ -856,6 +904,46 @@ Telegram не дає API «список повідомлень чату», то�
 діапазоном ID** від найранішого відстеженого до поточного. Те, що видалити не
 вдалося (чуже повідомлення або старше за 48 годин — ліміт Bot API), просто
 пропускається. Повідомлення `/start` зберігається як якір і не видаляється.
+
+**Стан — це два числа, а не список.** Якщо видалення все одно йде суцільним
+діапазоном, то з усього переліку надісланих повідомлень насправді потрібна лише
+його **нижня межа**. Тому `track()` не накопичує ID, а лише опускає межу:
+
+```python
+def track(self, *message_ids):
+    lowest = min(message_ids)
+    if current is None or lowest < current:
+        self._chat_data[KEY_FIRST_TRACKED] = lowest
+        self._save_anchors()
+```
+
+Це дає три речі одразу:
+
+1. **Персистентність стає тривіальною** — два `INTEGER` на чат замість списку,
+   що росте
+2. **Зникає витік пам'яті** — раніше `chat_data["message_ids"]` накопичував ID
+   кожного колись надісланого повідомлення і ніколи не звільнявся
+3. **Запис у БД стає рідкісним** — межа змінюється лише коли вона реально
+   опускається
+
+Виміряно: **200 повідомлень діалогу → 2 записи в БД**; цикл очищення → ще 2
+(скидання межі + нова клавіатура категорій). Звичайне надсилання картки вакансії
+в БД не пише взагалі.
+
+**Що відбувається при перезапуску.** `chat_data` порожній, але при першому ж
+зверненні до чату `ChatSession` підтягує опори з `chat_state`. Тому кнопка
+бачить повідомлення, надіслані ще до рестарту:
+
+```
+Запуск 1:  /start=101 → якір=102, далі повідомлення 103…107
+──────────── рестарт бота (chat_data очищено) ────────────
+Запуск 2:  якір=102 відновлено з БД, нові повідомлення 110…113
+Очищення:  видаляє 102…113, пропускає /start=101
+           новий якір=114 → одразу в БД
+```
+
+Повторне очищення після другого рестарту почнеться вже з `114` — вдруге по
+видалених ID бот не ходить.
 
 ### Блокуючий I/O
 

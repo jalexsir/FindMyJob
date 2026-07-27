@@ -31,7 +31,7 @@ class CategoryHandlers(HandlerGroup):
         )
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        session = self.session(context)
+        session = self.session(update, context)
         session.start_message_id = update.message.message_id
         session.category_page = 0
         self.user_state(update, context).set_categories([])
@@ -62,7 +62,7 @@ class CategoryHandlers(HandlerGroup):
 
         await query.answer()
         state.set_categories(selected)
-        await self._render_selection(query, selected, self.session(context).category_page)
+        await self._render_selection(query, selected, self.session(update, context).category_page)
 
     async def change_page(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Перехід між сторінками (◀️/▶️) — вибір категорій не зникає."""
@@ -70,7 +70,7 @@ class CategoryHandlers(HandlerGroup):
         await query.answer()
 
         page = int(cb.argument(query.data, cb.CB_CAT_PAGE))
-        self.session(context).category_page = page
+        self.session(update, context).category_page = page
         await self._render_selection(query, self.user_state(update, context).categories, page)
 
     async def noop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -95,14 +95,14 @@ class CategoryHandlers(HandlerGroup):
         message = await query.message.chat.send_message(
             texts.MSG_PICK_PERIOD, reply_markup=build_persistent_keyboard()
         )
-        self.session(context).track(message.message_id)
+        self.session(update, context).track(message.message_id)
 
     async def reselect(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Повертає до вибору категорій зі збереженим поточним вибором."""
         query = update.callback_query
         await query.answer()
 
-        session = self.session(context)
+        session = self.session(update, context)
         # При новому виборі категорій вакансії будуть перезавантажені
         session.clear_pending()
         session.category_page = 0

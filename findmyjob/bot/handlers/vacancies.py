@@ -69,10 +69,10 @@ class VacancyHandlers(HandlerGroup):
     ) -> None:
         """Запит з кнопки Reply Keyboard: зведення надсилається новим повідомленням."""
         message = update.message
-        session = self.session(context)
+        session = self.session(update, context)
 
         if not self.user_state(update, context).categories:
-            await self._prompt_categories(context, message.reply_text)
+            await self._prompt_categories(update, context, message.reply_text)
             return
 
         waiting = await message.reply_text(texts.MSG_LOADING)
@@ -106,10 +106,11 @@ class VacancyHandlers(HandlerGroup):
         """Запит з інлайн-кнопки: зведення замінює саме повідомлення з кнопкою."""
         query = update.callback_query
         await query.answer()
-        self.session(context).track(query.message.message_id)
+        session = self.session(update, context)
+        session.track(query.message.message_id)
 
         if not self.user_state(update, context).categories:
-            self.session(context).category_page = 0
+            session.category_page = 0
             await query.edit_message_text(
                 texts.MSG_NO_CATEGORY_SELECTED, reply_markup=build_category_keyboard([])
             )
@@ -121,13 +122,15 @@ class VacancyHandlers(HandlerGroup):
         text, keyboard = self._summary_message(selection, days)
         await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
-    async def _prompt_categories(self, context: ContextTypes.DEFAULT_TYPE, reply) -> None:
+    async def _prompt_categories(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, reply
+    ) -> None:
         """Жодної категорії не обрано — просимо обрати зі списку замість пошуку.
 
         Без цього фетч пішов би по всіх категоріях одразу (`categories or None`),
         і користувач отримав би зведення, якого не замовляв.
         """
-        session = self.session(context)
+        session = self.session(update, context)
         session.category_page = 0
         message = await reply(
             texts.MSG_NO_CATEGORY_SELECTED, reply_markup=build_category_keyboard([])
@@ -142,7 +145,7 @@ class VacancyHandlers(HandlerGroup):
         await query.answer()
         await query.edit_message_reply_markup(reply_markup=None)
 
-        session = self.session(context)
+        session = self.session(update, context)
         state = self.user_state(update, context)
         pending = session.pending_vacancies
 
@@ -168,7 +171,7 @@ class VacancyHandlers(HandlerGroup):
     async def decline_show(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         await query.answer()
-        session = self.session(context)
+        session = self.session(update, context)
         session.clear_pending()
         await query.edit_message_reply_markup(reply_markup=None)
         message = await query.message.reply_text(texts.MSG_MAYBE_LATER)
@@ -189,7 +192,7 @@ class VacancyHandlers(HandlerGroup):
         vacancies = sorted(
             (v for source in sources for v in source.vacancies), key=_publication_order
         )
-        self.session(context).pending_vacancies = [v.to_dict() for v in vacancies]
+        self.session(update, context).pending_vacancies = [v.to_dict() for v in vacancies]
 
         return VacancySelection(
             summary=build_summary(sources, days, hidden_count=hidden_count),

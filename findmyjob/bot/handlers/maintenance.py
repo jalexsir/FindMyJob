@@ -43,12 +43,16 @@ class MaintenanceHandlers(HandlerGroup):
         Telegram не дає списку повідомлень чату, тому йдемо суцільним діапазоном
         від найранішого відстеженого id до поточного: те, що видалити не вдалося
         (чуже або застаріле повідомлення), просто пропускаємо.
+
+        Нижня межа діапазону береться з `chat_state` у БД, тому очищення працює
+        і після перезапуску бота — на відміну від попередньої версії, де перелік
+        повідомлень жив лише в пам'яті процесу й губився при рестарті.
         """
-        session = self.session(context)
+        session = self.session(update, context)
         session.track(last_message_id)
 
-        tracked = session.tracked_message_ids
-        first_message_id = min(tracked) if tracked else last_message_id
+        first_tracked = session.first_tracked_message_id
+        first_message_id = last_message_id if first_tracked is None else first_tracked
         start_message_id = session.start_message_id
         session.forget_tracked()
 
@@ -75,4 +79,4 @@ class MaintenanceHandlers(HandlerGroup):
     async def track_user_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Запам'ятовує будь-яке повідомлення користувача — щоб потім видалити."""
         if update.message:
-            self.session(context).track(update.message.message_id)
+            self.session(update, context).track(update.message.message_id)
