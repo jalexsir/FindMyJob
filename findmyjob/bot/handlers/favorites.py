@@ -11,7 +11,9 @@ from telegram.ext import BaseHandler, CallbackQueryHandler, ContextTypes
 
 from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
-from findmyjob.bot.keyboards import build_favorites_confirm_keyboard, replace_button
+from findmyjob.bot.keyboards import (
+    build_favorites_confirm_keyboard, build_reselect_keyboard, replace_button,
+)
 from findmyjob.bot.sending import VacancySender
 from findmyjob.bot.state import StateRepository, UserState
 from findmyjob.feeds import VacancyFeedService
@@ -149,7 +151,9 @@ class FavoriteHandlers(HandlerGroup):
         query = update.callback_query
         await query.answer()
         await query.edit_message_reply_markup(reply_markup=None)
-        message = await query.message.reply_text(texts.MSG_TICK_TOCK)
+        message = await query.message.reply_text(
+            texts.MSG_RESELECT_PROMPT, reply_markup=build_reselect_keyboard()
+        )
         self.session(update, context).track(message.message_id)
 
     async def _collect(self, state: UserState) -> list[dict]:
