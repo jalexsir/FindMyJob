@@ -11,11 +11,17 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from findmyjob.models import Vacancy
 
 from .diagnostics import log_dedup, log_duplicate_pair
+from .parsing.text import collapse_spaces, normalize_apostrophes, normalize_homoglyphs
+
+# Роздільники всередині назви: та сама вакансія на DOU і Djinni легко
+# відрізняється лише ними ("… систем | СЕВ ОВВ" проти "… систем / СЕВ ОВВ").
+_SEPARATORS_RE = re.compile(r"[|/\\—–−\-,;·•]+")
 
 
 @dataclass(frozen=True)
@@ -50,6 +56,7 @@ def merge_by_title_and_company(
 ) -> MergeResult:
     """Об'єднує списки різних сайтів за парою (назва, компанія).
 
+    Порівнюються не сирі рядки, а їх нормалізована форма (`dedup_key`).
     Якщо компанія порожня — порівнюємо тільки за назвою.
     """
     _log_start(name, primary, secondary)
@@ -71,8 +78,24 @@ def merge_by_title_and_company(
     return _finish(name, primary + unique, duplicates)
 
 
+def dedup_key(value: str) -> str:
+    """Нормалізована форма назви/компанії — саме вона порівнюється.
+
+    Сирі рядки для цього не годяться: одну й ту саму вакансію DOU і Djinni
+    пишуть по-різному — інший роздільник ("| " проти "/"), тире замість дефіса,
+    зайві пробіли, змішана кирилиця з латиницею ("СЕВ" проти "CEB").
+
+    Крапки, плюси, решітки й дужки навмисно НЕ чіпаємо: саме вони відрізняють
+    C++ від C#, .NET від NET і "(React)" від "(Vue)".
+    """
+    normalized = normalize_homoglyphs(normalize_apostrophes(value.replace("\xa0", " ")))
+    return collapse_spaces(_SEPARATORS_RE.sub(" ", normalized)).lower()
+
+
 class _TitleCompanyIndex:
     """Індекс уже побачених вакансій за назвою та парою (назва, компанія).
+
+    Ключі — нормалізовані (`dedup_key`), а не сирі рядки.
 
     Зберігає саму вакансію, а не лише ключ, щоб при виявленні дубліката можна
     було залогувати ОБИДВА записи разом з посиланнями.
@@ -85,8 +108,8 @@ class _TitleCompanyIndex:
 
     def add(self, vacancy: Vacancy) -> Vacancy | None:
         """Реєструє вакансію. Повертає раніше збережений дублікат або None."""
-        title = vacancy.title.strip().lower()
-        company = vacancy.company.strip().lower()
+        title = dedup_key(vacancy.title)
+        company = dedup_key(vacancy.company)
 
         if not title:
             # Порожня назва — порівнювати нема з чим, завжди залишаємо
