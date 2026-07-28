@@ -130,6 +130,13 @@ def build_show_hidden_prompt_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def build_reselect_keyboard() -> InlineKeyboardMarkup:
+    """Єдина кнопка «Переобрати категорії пошуку»."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_RESELECT_CATS, callback_data=cb.CB_RESELECT_CATS)],
+    ])
+
+
 def build_no_vacancies_keyboard() -> InlineKeyboardMarkup:
     """Клавіатура для "нічого не знайдено": глянути вилучені (спочатку кількість +
     підтвердження) АБО переобрати категорії."""
