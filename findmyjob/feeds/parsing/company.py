@@ -139,6 +139,12 @@ def is_invalid_company(text: str, title: str = "") -> bool:
     if first_word in GENERIC_LEADING_WORDS:
         return True
 
+    # Самі лише займенники/загальні іменники ("Ми", "Наша команда") — це початок
+    # опису, а не назва. Djinni-описи часто відкриваються "Ми — команда, яка…",
+    # і патерн "<Назва> — опис" сумлінно віддає звідти "Ми".
+    if all(word.lower().strip("'\"(),.") in _SUBJECT_STOP_WORDS for word in words):
+        return True
+
     if title and _duplicates_title(candidate, title):
         return True
 
