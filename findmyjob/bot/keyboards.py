@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup,
 )
@@ -19,6 +21,35 @@ CATEGORIES_PER_ROW = 2
 MAX_SELECTED_CATEGORIES = 5
 
 
+@dataclass(frozen=True)
+class CategoryFlow:
+    """Куди ведуть кнопки клавіатури категорій.
+
+    Клавіатура одна на два сценарії — пошук і сповіщення, — але callback_data в
+    них мають бути різні: інакше вибір категорій для сповіщень затирав би
+    категорії пошуку.
+    """
+
+    toggle: str
+    page: str
+    confirm: str
+    confirm_label: str
+
+
+SEARCH_FLOW = CategoryFlow(
+    toggle=cb.CB_CAT_TOGGLE,
+    page=cb.CB_CAT_PAGE,
+    confirm=cb.CB_CAT_CONFIRM,
+    confirm_label="▶️ Продовжити",
+)
+NOTIFY_FLOW = CategoryFlow(
+    toggle=cb.CB_NOTIFY_TOGGLE,
+    page=cb.CB_NOTIFY_PAGE,
+    confirm=cb.CB_NOTIFY_CONFIRM,
+    confirm_label="🔔 Додати нотифікацію",
+)
+
+
 def build_persistent_keyboard() -> ReplyKeyboardMarkup:
     """Головне меню, що завжди видно внизу."""
     return ReplyKeyboardMarkup(
@@ -27,7 +58,8 @@ def build_persistent_keyboard() -> ReplyKeyboardMarkup:
              KeyboardButton(texts.BTN_VAC_7D),
              KeyboardButton(texts.BTN_VAC_ALL)],
             [KeyboardButton(texts.BTN_SHOW_HIDDEN),
-             KeyboardButton(texts.BTN_FAVORITES)],
+             KeyboardButton(texts.BTN_FAVORITES),
+             KeyboardButton(texts.BTN_NOTIFICATIONS)],
             [KeyboardButton(texts.BTN_CLEAR),
              KeyboardButton(texts.BTN_CLEAR_HIDE)],
         ],
@@ -36,7 +68,9 @@ def build_persistent_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def build_category_keyboard(selected: list[str], page: int = 0) -> InlineKeyboardMarkup:
+def build_category_keyboard(
+    selected: list[str], page: int = 0, flow: CategoryFlow = SEARCH_FLOW
+) -> InlineKeyboardMarkup:
     """Клавіатура вибору категорій із пагінацією.
 
     Позначки (✅/⬜) зберігаються при переході між сторінками, бо стан вибору не
@@ -51,7 +85,7 @@ def build_category_keyboard(selected: list[str], page: int = 0) -> InlineKeyboar
         [
             InlineKeyboardButton(
                 f"{'✅' if category in selected else '⬜'} {category}",
-                callback_data=cb.payload(cb.CB_CAT_TOGGLE, category),
+                callback_data=cb.payload(flow.toggle, category),
             )
             for category in page_categories[i:i + CATEGORIES_PER_ROW]
         ]
@@ -59,23 +93,35 @@ def build_category_keyboard(selected: list[str], page: int = 0) -> InlineKeyboar
     ]
 
     if total_pages > 1:
-        rows.append(_pagination_row(page, total_pages))
+        rows.append(_pagination_row(page, total_pages, flow))
 
     if selected:
         rows.append([InlineKeyboardButton(
-            f"▶️ Продовжити ({len(selected)} обрано)",
-            callback_data=cb.CB_CAT_CONFIRM,
+            f"{flow.confirm_label} ({len(selected)} обрано)",
+            callback_data=flow.confirm,
         )])
     return InlineKeyboardMarkup(rows)
 
 
-def _pagination_row(page: int, total_pages: int) -> list[InlineKeyboardButton]:
+def build_notifications_keyboard(subscribed: bool) -> InlineKeyboardMarkup:
+    """Екран «Сповіщення»: налаштувати, а якщо підписка вже є — ще й вимкнути."""
+    rows = [[InlineKeyboardButton(texts.BTN_NOTIFY_SETUP, callback_data=cb.CB_NOTIFY_SETUP)]]
+    if subscribed:
+        rows.append(
+            [InlineKeyboardButton(texts.BTN_NOTIFY_OFF, callback_data=cb.CB_NOTIFY_OFF)]
+        )
+    return InlineKeyboardMarkup(rows)
+
+
+def _pagination_row(
+    page: int, total_pages: int, flow: CategoryFlow = SEARCH_FLOW
+) -> list[InlineKeyboardButton]:
     row = []
     if page > 0:
-        row.append(InlineKeyboardButton("◀️", callback_data=cb.payload(cb.CB_CAT_PAGE, page - 1)))
+        row.append(InlineKeyboardButton("◀️", callback_data=cb.payload(flow.page, page - 1)))
     row.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data=cb.CB_NOOP))
     if page < total_pages - 1:
-        row.append(InlineKeyboardButton("▶️", callback_data=cb.payload(cb.CB_CAT_PAGE, page + 1)))
+        row.append(InlineKeyboardButton("▶️", callback_data=cb.payload(flow.page, page + 1)))
     return row
 
 

@@ -59,9 +59,19 @@ CREATE TABLE IF NOT EXISTS chat_state (
 );
 """
 
+_NOTIFICATION_SUBS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS notification_subs (
+    user_id    INTEGER PRIMARY KEY,
+    chat_id    INTEGER NOT NULL,
+    categories TEXT    NOT NULL,
+    created_at TEXT
+);
+"""
+
 _TABLE_HIDDEN = "hidden"
 _TABLE_FAVORITES = "favorites"
 _TABLE_CHAT_STATE = "chat_state"
+_TABLE_NOTIFICATION_SUBS = "notification_subs"
 
 
 @dataclass(frozen=True)
@@ -81,8 +91,22 @@ class ChatAnchors:
     start_message_id: int | None = None
 
 
+@dataclass(frozen=True)
+class NotificationSub:
+    """Підписка користувача на сповіщення про нові вакансії.
+
+    `chat_id` зберігається разом із підпискою, бо шкедулер працює без апдейта —
+    взяти чат із `update.effective_chat` там немає звідки.
+    """
+
+    user_id: int
+    chat_id: int
+    categories: list[str]
+
+
 class VacancyStore:
-    """Доступ до SQLite-таблиць `hidden`, `favorites` і `chat_state`."""
+    """Доступ до SQLite-таблиць `hidden`, `favorites`, `chat_state`
+    і `notification_subs`."""
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -95,6 +119,7 @@ class VacancyStore:
             conn.execute(_SCHEMA.format(table=_TABLE_HIDDEN))
             conn.execute(_SCHEMA.format(table=_TABLE_FAVORITES))
             conn.execute(_CHAT_STATE_SCHEMA)
+            conn.execute(_NOTIFICATION_SUBS_SCHEMA)
 
     # ── Списки вакансій ──────────────────────────────────────────────────────
 
@@ -134,6 +159,36 @@ class VacancyStore:
                 f"start_message_id = excluded.start_message_id",
                 (chat_id, anchors.first_tracked_message_id, anchors.start_message_id),
             )
+
+    # ── Підписки на сповіщення ───────────────────────────────────────────────
+
+    def save_subscription(self, user_id: int, chat_id: int, categories: list[str]) -> None:
+        """Створює або переписує підписку — на користувача вона рівно одна."""
+        with self._connect() as conn:
+            conn.execute(
+                f"INSERT INTO {_TABLE_NOTIFICATION_SUBS} "
+                f"(user_id, chat_id, categories, created_at) VALUES (?, ?, ?, ?) "
+                f"ON CONFLICT(user_id) DO UPDATE SET "
+                f"chat_id = excluded.chat_id, categories = excluded.categories",
+                (user_id, chat_id, json.dumps(categories), datetime.now().isoformat()),
+            )
+
+    def delete_subscription(self, user_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                f"DELETE FROM {_TABLE_NOTIFICATION_SUBS} WHERE user_id = ?", (user_id,)
+            )
+
+    def load_all_subscriptions(self) -> dict[int, NotificationSub]:
+        """Усі підписки — шкедулер читає їх один раз при старті."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT user_id, chat_id, categories FROM {_TABLE_NOTIFICATION_SUBS}"
+            ).fetchall()
+        return {
+            user_id: NotificationSub(user_id, chat_id, _load_categories(raw))
+            for user_id, chat_id, raw in rows
+        }
 
     # ── Внутрішні деталі ─────────────────────────────────────────────────────
 
@@ -184,6 +239,15 @@ def _entry_to_row(user_id: int, short_link: str, entry: dict) -> tuple:
         entry.get("category", ""),
         json.dumps(entry.get("categories", [])),
     )
+
+
+def _load_categories(raw: str) -> list[str]:
+    """Битий JSON у колонці не має валити старт бота — краще порожній список."""
+    try:
+        categories = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return categories if isinstance(categories, list) else []
 
 
 def _row_to_entry(row: list) -> tuple[str, dict]:

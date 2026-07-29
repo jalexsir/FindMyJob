@@ -8,12 +8,13 @@ BTN_VAC_7D = "📆 Вакансії за 7 днів"
 BTN_VAC_ALL = "📋 Всі вакансії"
 BTN_SHOW_HIDDEN = "🔍 Вилучені з пошуку"
 BTN_FAVORITES = "⭐ Обране"
+BTN_NOTIFICATIONS = "🔔 Сповіщення"
 BTN_CLEAR = "🗑 Очистити листування"
 BTN_CLEAR_HIDE = "🗑 Очистити список вилучених"
 
 ALL_BUTTON_TEXTS = (
     BTN_VAC_1D, BTN_VAC_7D, BTN_VAC_ALL,
-    BTN_SHOW_HIDDEN, BTN_FAVORITES, BTN_CLEAR, BTN_CLEAR_HIDE,
+    BTN_SHOW_HIDDEN, BTN_FAVORITES, BTN_NOTIFICATIONS, BTN_CLEAR, BTN_CLEAR_HIDE,
 )
 
 # ── Підписи інлайн-кнопок ─────────────────────────────────────────────────────
@@ -26,6 +27,8 @@ BTN_HIDE = "🙈 Не показувати"
 BTN_RESTORE = "👁 Відновити до перегляду"
 BTN_SHOW_HIDDEN_LIST = "🔍 Показати вилучені вакансії"
 BTN_RESELECT_CATS = "🔄 Переобрати категорії пошуку"
+BTN_NOTIFY_SETUP = "⚙️ Налаштувати сповіщення"
+BTN_NOTIFY_OFF = "🔕 Вимкнути сповіщення"
 BTN_YES = "✅ Так"
 BTN_NO = "❌ Ні"
 
@@ -39,6 +42,12 @@ MSG_SHOW_VACANCIES = "❓ <b>Показати вакансії?</b>"
 MSG_NO_VACANCIES = "Вакансій не знайдено (або всі приховані)."
 MSG_MAYBE_LATER = "👍 Добре, почекаємо оновлень!"
 MSG_RESELECT_PROMPT = "🔎 Можеш переобрати категорії пошуку 👇"
+MSG_NOTIFY_INTRO = (
+    "🔔 Тут ти можеш налаштувати сповіщення на нові вакансії "
+    "по обраних категоріях"
+)
+MSG_NOTIFY_PICK = "Оберіть одну або декілька категорій вакансій для сповіщення 👇"
+MSG_NOTIFY_OFF = "🔕 Сповіщення вимкнено. Увімкнути назад можна в меню «Сповіщення»."
 MSG_HIDDEN_EMPTY = "📭 Список вилучених вакансій порожній."
 MSG_HIDDEN_ALREADY_EMPTY = "📭 Список пустий"
 MSG_FAVORITES_EMPTY = "⭐ Список обраних вакансій порожній."
@@ -105,3 +114,30 @@ def categories_status(selected: list[str]) -> str:
 
 def categories_confirmed(selected: list[str]) -> str:
     return f"✅ Категорії обрано: <b>{', '.join(selected)}</b>\n\nМеню доступне внизу 👇"
+
+
+def notifications_status(selected: list[str]) -> str:
+    """Текст над клавіатурою вибору категорій для сповіщень."""
+    if not selected:
+        return MSG_NOTIFY_PICK
+    return (
+        f"Категорії для сповіщення: <b>{', '.join(selected)}</b>\n\n"
+        "Натисни 🔔 Додати нотифікацію або обери ще."
+    )
+
+
+def notifications_intro(subscribed: list[str]) -> str:
+    """Екран «Сповіщення»: підказка або поточна підписка."""
+    if not subscribed:
+        return MSG_NOTIFY_INTRO
+    return (
+        f"🔔 Сповіщення увімкнено для категорій: <b>{', '.join(subscribed)}</b>\n\n"
+        "Перевіряю нові вакансії щогодини з 8:00 до 20:00."
+    )
+
+
+def notifications_saved(selected: list[str]) -> str:
+    return (
+        f"✅ Сповіщення увімкнено для категорій: <b>{', '.join(selected)}</b>\n\n"
+        "Щогодини з 8:00 до 20:00 надсилатиму нові вакансії за сьогодні."
+    )

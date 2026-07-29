@@ -22,6 +22,9 @@ CB_FAVS_NO = "favs_no"
 CB_CAT_CONFIRM = "cat_confirm"
 CB_NOOP = "noop"                              # кнопка-індикатор сторінки
 CB_RESELECT_CATS = "reselect_cats"
+CB_NOTIFY_SETUP = "notify_setup"              # почати вибір категорій сповіщень
+CB_NOTIFY_CONFIRM = "notify_confirm"          # "Додати нотифікацію"
+CB_NOTIFY_OFF = "notify_off"
 
 # Дії з параметром — префікси, до яких дописується значення
 CB_CONFIRM_YES = "confirm_yes:"
@@ -33,6 +36,10 @@ CB_UNFAVORITE = "unfav:"
 CB_FAV_DELETE = "fav_del:"    # видалити з обраних при перегляді списку
 CB_CAT_TOGGLE = "cat_toggle:"
 CB_CAT_PAGE = "cat_page:"
+# Вибір категорій для сповіщень має власні префікси: інакше він затирав би
+# категорії пошуку, бо клавіатура та сама.
+CB_NOTIFY_TOGGLE = "ntf_toggle:"
+CB_NOTIFY_PAGE = "ntf_page:"
 
 
 def payload(prefix: str, value) -> str:

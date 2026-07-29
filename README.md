@@ -50,6 +50,7 @@ FindMyJob — Telegram-бот для пошуку IT та Defence-tech вака�
 | 📋 Всі вакансії | `days=None` — без обмеження по даті |
 | 🔍 Вилучені з пошуку | Кількість вилучених + підтвердження показу |
 | ⭐ Обране | Кількість обраних + підтвердження показу |
+| 🔔 Сповіщення | Підписка на нові вакансії по обраних категоріях |
 | 🗑 Очистити листування | Видаляє повідомлення, скидає категорії, повертає до кроку 1 |
 | 🗑 Очистити список вилучених | Очищає список (або «📭 Список пустий») |
 
@@ -121,9 +122,28 @@ FindMyJob — Telegram-бот для пошуку IT та Defence-tech вака�
 
 - `⭐ В обране` → вакансія потрапляє в персональний список, кнопка стає `💛 В обраному`
 - Повторний клік → видаляє з обраного
-- `⭐ Обране` → кількість + питання «Показати їх?» (`❌ Ні` → «⏰ Часікі тікають!»)
+- `⭐ Обране` → кількість + питання «Показати їх?» (`❌ Ні` → кнопка
+  `🔄 Переобрати категорії пошуку`)
 - У списку обраних кнопки інші: `🔗 Відкрити` · `💔 Прибрати з обраних` · `🙈 Не показувати`
 - Список **персональний** і **персистентний** (SQLite)
+
+### Сповіщення про нові вакансії
+
+`🔔 Сповіщення` → екран із кнопкою `⚙️ Налаштувати сповіщення` → та сама
+клавіатура категорій, але внизу `🔔 Додати нотифікацію (N обрано)`.
+
+- Категорії сповіщень **окремі** від категорій пошуку: шукати руками можна одне,
+  а отримувати сповіщення про інше. Тому клавіатура має власні `callback_data`
+  (`ntf_toggle:` / `ntf_page:` / `notify_confirm`) — інакше один сценарій затирав
+  би вибір іншого
+- Ліміт той самий — до 5 категорій
+- Проміжний вибір живе в `chat_data` як чернетка; у БД він потрапляє **лише**
+  підтвердженим, тож наявна підписка не псується на півдорозі
+- Підписка **персональна** й **персистентна** (`notification_subs`), разом із нею
+  зберігається `chat_id`: шкедулер працює без апдейта, і взяти чат із
+  `update.effective_chat` там немає звідки
+- Повторне налаштування **переписує** список, `🔕 Вимкнути сповіщення` — видаляє
+  підписку цілком
 
 ### Мітка NEW
 
@@ -200,6 +220,7 @@ FindMyJob/
 │           ├── vacancies.py      — пошук, зведення, показ
 │           ├── hidden.py         — Вилучені з пошуку
 │           ├── favorites.py      — Обране
+│           ├── notifications.py   — підписка на сповіщення
 │           ├── maintenance.py    — очищення листування
 │           └── menu.py           — маршрутизація кнопок нижнього меню
 ├── deploy/findmyjob-bot.service  — systemd-юніт
@@ -618,7 +639,7 @@ merge_by_title_and_company(name, primary, secondary) -> MergeResult
 `VacancyStore` (`findmyjob/storage.py`) — SQLite, файл `bot_storage.db`.
 
 ```python
-store.init_db()                          # CREATE TABLE IF NOT EXISTS ×3
+store.init_db()                          # CREATE TABLE IF NOT EXISTS ×4
 
 store.replace_hidden(user_id, data)      # data: {short_link: {...}}
 store.replace_favorites(user_id, data)
@@ -627,9 +648,13 @@ store.load_all_favorites() -> {user_id: {short_link: {...}}}
 
 store.save_chat_anchors(chat_id, ChatAnchors(...))
 store.load_chat_anchors(chat_id) -> ChatAnchors
+
+store.save_subscription(user_id, chat_id, categories)
+store.delete_subscription(user_id)
+store.load_all_subscriptions() -> {user_id: NotificationSub}
 ```
 
-Три таблиці. `hidden` і `favorites` — однакової схеми:
+Чотири таблиці. `hidden` і `favorites` — однакової схеми:
 
 ```sql
 CREATE TABLE IF NOT EXISTS hidden (
@@ -676,8 +701,19 @@ class ChatAnchors:
 чат. Детальніше про те, чому двох чисел достатньо, — у розділі
 [«Очищення листування»](#очищення-листування).
 
+Четверта — `notification_subs`, підписки на сповіщення:
+
+```sql
+CREATE TABLE IF NOT EXISTS notification_subs (
+    user_id    INTEGER PRIMARY KEY,   -- підписка на користувача рівно одна
+    chat_id    INTEGER NOT NULL,      -- куди слати; шкедулер працює без апдейта
+    categories TEXT    NOT NULL,      -- JSON-масив
+    created_at TEXT
+);
+```
+
 **Міграція не потрібна.** `init_db()` виконує `CREATE TABLE IF NOT EXISTS` для
-всіх трьох таблиць і є ідемпотентним: на наявній БД він лише додає `chat_state`,
+всіх чотирьох таблиць і є ідемпотентним: на наявній БД він лише додає нові,
 не чіпаючи `hidden` і `favorites`.
 
 **Увімкнено WAL** (`PRAGMA journal_mode = WAL`) — читання не блокує запис.
@@ -797,10 +833,12 @@ prefixed(CB_HIDE)              # "^hide:"       — дії з параметро
 | `bot_data["vcache_{uid}"]` | `dict[str, dict]` | Кеш повних даних показаних вакансій | у пам'яті |
 | `bot_data["seen_{uid}"]` | `set[str]` | Хеші переглянутих вакансій (мітка NEW) | у пам'яті |
 | `bot_data["categories_{uid}"]` | `list[str]` | Обрані категорії пошуку | у пам'яті |
+| `bot_data["notify_{uid}"]` | `list[str]` | Категорії підписки на сповіщення | **SQLite** |
 | `chat_data["first_tracked_message_id"]` | `int \| None` | Нижня межа діапазону очищення | **SQLite** |
 | `chat_data["start_message_id"]` | `int \| None` | ID повідомлення `/start` (якір) | **SQLite** |
 | `chat_data["pending_vacancies"]` | `list[dict]` | Вибірка між зведенням і показом | у пам'яті |
 | `chat_data["cat_page"]` | `int` | Поточна сторінка вибору категорій | у пам'яті |
+| `chat_data["notify_draft"]` | `list[str]` | Чернетка вибору категорій сповіщень | у пам'яті |
 | `chat_data["anchors_loaded"]` | `bool` | Прапорець лінивої гідратації з БД | службовий |
 
 Доступ до цих ключів інкапсульовано у двох класах (`bot/state.py`) — напряму до
