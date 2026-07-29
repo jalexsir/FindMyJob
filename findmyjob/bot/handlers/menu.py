@@ -15,6 +15,7 @@ from .base import HandlerGroup
 from .favorites import FavoriteHandlers
 from .hidden import HiddenHandlers
 from .maintenance import MaintenanceHandlers
+from .notifications import NotificationHandlers
 from .vacancies import VacancyHandlers
 
 MenuAction = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]]
@@ -35,6 +36,7 @@ class MenuHandlers(HandlerGroup):
         vacancies: VacancyHandlers,
         hidden: HiddenHandlers,
         favorites: FavoriteHandlers,
+        notifications: NotificationHandlers,
         maintenance: MaintenanceHandlers,
     ) -> None:
         super().__init__(states)
@@ -44,6 +46,9 @@ class MenuHandlers(HandlerGroup):
             texts.BTN_VAC_ALL: lambda u, c: vacancies.request_from_message(u, c, days=None),
             texts.BTN_SHOW_HIDDEN: lambda u, c: hidden.send_prompt(u.message.chat, u, c),
             texts.BTN_FAVORITES: lambda u, c: favorites.send_prompt(u.message.chat, u, c),
+            texts.BTN_NOTIFICATIONS: lambda u, c: notifications.send_prompt(
+                u.message.chat, u, c
+            ),
             texts.BTN_CLEAR: lambda u, c: maintenance.clear_chat(
                 u, c, chat_id=u.message.chat_id, last_message_id=u.message.message_id
             ),

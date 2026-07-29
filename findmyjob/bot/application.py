@@ -8,10 +8,12 @@ from telegram.ext import Application
 
 from findmyjob.bot.handlers import (
     CategoryHandlers, FavoriteHandlers, HandlerGroup, HiddenHandlers,
-    MaintenanceHandlers, MenuHandlers, VacancyHandlers,
+    MaintenanceHandlers, MenuHandlers, NotificationHandlers, VacancyHandlers,
 )
 from findmyjob.bot.sending import VacancySender
-from findmyjob.bot.state import StateRepository, favorites_key, hidden_key
+from findmyjob.bot.state import (
+    StateRepository, favorites_key, hidden_key, notifications_key,
+)
 from findmyjob.config import Settings
 from findmyjob.feeds import FeedFetcher, VacancyFeedService
 from findmyjob.images import VacancyImageRenderer
@@ -40,6 +42,7 @@ class BotApplication:
         )
         hidden = HiddenHandlers(self._states, feeds, images)
         favorites = FavoriteHandlers(self._states, feeds, sender)
+        notifications = NotificationHandlers(self._states)
         maintenance = MaintenanceHandlers(self._states)
 
         # Порядок груп = порядок реєстрації обробників. Патерни callback_data не
@@ -49,8 +52,11 @@ class BotApplication:
             vacancies,
             hidden,
             favorites,
+            notifications,
             maintenance,
-            MenuHandlers(self._states, vacancies, hidden, favorites, maintenance),
+            MenuHandlers(
+                self._states, vacancies, hidden, favorites, notifications, maintenance
+            ),
         )
 
     def build(self) -> Application:
@@ -71,17 +77,21 @@ class BotApplication:
         application.run_polling()
 
     def _preload_state(self, application: Application) -> None:
-        """Підвантажує "Вилучені" та "Обране" з БД у bot_data одним заходом."""
+        """Підвантажує "Вилучені", "Обране" й підписки з БД у bot_data."""
         all_hidden = self._store.load_all_hidden()
         all_favorites = self._store.load_all_favorites()
+        all_subscriptions = self._store.load_all_subscriptions()
 
         for user_id, records in all_hidden.items():
             application.bot_data[hidden_key(user_id)] = records
         for user_id, records in all_favorites.items():
             application.bot_data[favorites_key(user_id)] = records
+        for user_id, subscription in all_subscriptions.items():
+            application.bot_data[notifications_key(user_id)] = subscription.categories
 
         logger.info(
-            "Підвантажено з БД: %d hidden-записів, %d favorites-записів",
+            "Підвантажено з БД: %d hidden-записів, %d favorites-записів, %d підписок",
             sum(len(records) for records in all_hidden.values()),
             sum(len(records) for records in all_favorites.values()),
+            len(all_subscriptions),
         )

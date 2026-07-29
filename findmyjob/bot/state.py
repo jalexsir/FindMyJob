@@ -23,6 +23,7 @@ FAVORITES_KEY_PREFIX = "favorites_"
 SEEN_KEY_PREFIX = "seen_"
 VACANCY_CACHE_KEY_PREFIX = "vcache_"
 CATEGORIES_KEY_PREFIX = "categories_"
+NOTIFICATIONS_KEY_PREFIX = "notify_"
 
 
 def hidden_key(user_id: int) -> str:
@@ -31,6 +32,10 @@ def hidden_key(user_id: int) -> str:
 
 def favorites_key(user_id: int) -> str:
     return f"{FAVORITES_KEY_PREFIX}{user_id}"
+
+
+def notifications_key(user_id: int) -> str:
+    return f"{NOTIFICATIONS_KEY_PREFIX}{user_id}"
 
 
 class UserState:
@@ -118,6 +123,27 @@ class UserState:
     def set_categories(self, categories: list[str]) -> None:
         self._bot_data[f"{CATEGORIES_KEY_PREFIX}{self._user_id}"] = categories
 
+    # ── Підписка на сповіщення ───────────────────────────────────────────────
+    # Категорії сповіщень — окремі від категорій пошуку: людина може шукати
+    # руками одне, а отримувати сповіщення про інше. Живуть у БД, бо шкедулер
+    # має бачити їх і після перезапуску бота.
+
+    @property
+    def notification_categories(self) -> list[str]:
+        return self._bot_data.get(notifications_key(self._user_id), [])
+
+    @property
+    def has_notifications(self) -> bool:
+        return bool(self.notification_categories)
+
+    def subscribe_notifications(self, chat_id: int, categories: list[str]) -> None:
+        self._bot_data[notifications_key(self._user_id)] = list(categories)
+        self._store.save_subscription(self._user_id, chat_id, list(categories))
+
+    def unsubscribe_notifications(self) -> None:
+        self._bot_data.pop(notifications_key(self._user_id), None)
+        self._store.delete_subscription(self._user_id)
+
 
 class ChatSession:
     """Стан діалогу в межах чату: опорні точки очищення й підготовлена вибірка.
@@ -137,6 +163,7 @@ class ChatSession:
     KEY_PENDING = "pending_vacancies"
     KEY_CATEGORY_PAGE = "cat_page"
     KEY_ANCHORS_LOADED = "anchors_loaded"
+    KEY_NOTIFY_DRAFT = "notify_draft"
 
     def __init__(self, chat_data: dict[str, Any], chat_id: int, store: VacancyStore) -> None:
         self._chat_data = chat_data
@@ -216,6 +243,21 @@ class ChatSession:
     @category_page.setter
     def category_page(self, page: int) -> None:
         self._chat_data[self.KEY_CATEGORY_PAGE] = page
+
+    # ── Чернетка вибору категорій для сповіщень ──────────────────────────────
+    # Проміжний вибір, поки не натиснуто "Додати нотифікацію": у БД він потрапляє
+    # лише підтвердженим, тож наявна підписка не псується на півдорозі.
+
+    @property
+    def notify_draft(self) -> list[str]:
+        return self._chat_data.setdefault(self.KEY_NOTIFY_DRAFT, [])
+
+    @notify_draft.setter
+    def notify_draft(self, categories: list[str]) -> None:
+        self._chat_data[self.KEY_NOTIFY_DRAFT] = categories
+
+    def clear_notify_draft(self) -> None:
+        self._chat_data.pop(self.KEY_NOTIFY_DRAFT, None)
 
     # ── Підготовлена вибірка вакансій ────────────────────────────────────────
     # Заповнюється на кроці зведення, показується після підтвердження — щоб не
