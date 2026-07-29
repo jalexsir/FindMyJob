@@ -153,14 +153,30 @@ class _Stage1Cache:
 
     def get(self, key: tuple[str, ...]) -> Stage1 | None:
         with self._lock:
+            self._evict_expired()
             entry = self._entries.get(key)
-            if entry is None or (time.monotonic() - entry[0]) >= self._ttl:
-                return None
-            return entry[1]
+            return None if entry is None else entry[1]
 
     def put(self, key: tuple[str, ...], value: Stage1) -> None:
         with self._lock:
+            self._evict_expired()
             self._entries[key] = (time.monotonic(), value)
+
+    def _evict_expired(self) -> None:
+        """Прибирає протухле. Викликається під локом.
+
+        Без цього кеш тільки ріс би: кожен новий набір категорій — це окремий
+        ключ на кілька сотень кілобайт, і протухлі записи трималися б у пам'яті
+        до перезапуску процесу. Наборів рівно стільки, скільки різних комбінацій
+        категорій обрали користувачі, тож саме собою це не стабілізується.
+        """
+        now = time.monotonic()
+        expired = [
+            key for key, (stored_at, _) in self._entries.items()
+            if (now - stored_at) >= self._ttl
+        ]
+        for key in expired:
+            del self._entries[key]
 
 
 def _date_cutoff(days: int | None) -> date | None:

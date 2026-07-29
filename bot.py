@@ -14,6 +14,10 @@ def configure_logging() -> None:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         level=logging.INFO,
     )
+    # httpx пише рядок на кожен HTTP-виклик, а PTB опитує Telegram по колу —
+    # це кілька рядків на хвилину цілодобово, і власні повідомлення бота в
+    # журналі просто тонуть.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main() -> None:

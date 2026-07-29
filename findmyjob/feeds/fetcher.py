@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Sequence
 
@@ -18,6 +19,16 @@ from .parsing import EntryParser
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 15
+# Стеля потоків. Без неї пул дорівнював би кількості джерел, а вона росте разом
+# із кількістю категорій: для всіх 33 це 130 потоків і стільки ж одночасних
+# з'єднань до двох хостів — на 1 OCPU і зайва пам'ять, і привід для сайтів
+# відповісти 429.
+#
+# Саме 12, а не менше: максимум для ручного пошуку — 5 категорій, тобто 20
+# джерел, і при 12 воркерах це рівно дві хвилі (виміряно: 1.2 с проти 0.6 с без
+# стелі, тоді як при 8 було б 1.8 с). Джоба зі всіма категоріями відпрацює за
+# ~7 с замість ~1 с, але вона годинна, і там це не має значення.
+MAX_PARALLEL_FEEDS = 12
 DEFAULT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -25,6 +36,11 @@ DEFAULT_HEADERS = {
         "Chrome/120.0.0.0 Safari/537.36"
     )
 }
+
+
+def worker_count(source_count: int) -> int:
+    """Скільки потоків піднімати під `source_count` фідів."""
+    return max(1, min(source_count, MAX_PARALLEL_FEEDS))
 
 
 class FeedFetcher:
@@ -43,6 +59,23 @@ class FeedFetcher:
         self._timeout = timeout
         self._parser = parser or EntryParser()
         self._headers = headers or DEFAULT_HEADERS
+        self._local = threading.local()
+
+    @property
+    def _session(self) -> requests.Session:
+        """HTTP-сесія поточного потоку — заради повторного використання з'єднань.
+
+        Голий `requests.get` робить новий TLS-хендшейк на кожен фід, а їх за
+        прохід десятки, і всі до двох хостів. Сесія на потік, а не одна спільна:
+        `requests.Session` не гарантує потокобезпечності, а воркерів усе одно
+        небагато (`MAX_PARALLEL_FEEDS`), тож з'єднання перевикористовуються.
+        """
+        session = getattr(self._local, "session", None)
+        if session is None:
+            session = requests.Session()
+            session.headers.update(self._headers)
+            self._local.session = session
+        return session
 
     def fetch_all(self, sources: Sequence[FeedSource]) -> dict[FeedSource, list[Vacancy]]:
         """Завантажує всі джерела паралельно. Без фільтру по даті."""
@@ -50,7 +83,7 @@ class FeedFetcher:
             return {}
 
         results: dict[FeedSource, list[Vacancy]] = {}
-        with ThreadPoolExecutor(max_workers=len(sources)) as executor:
+        with ThreadPoolExecutor(max_workers=worker_count(len(sources))) as executor:
             futures = {executor.submit(self.fetch_one, source): source for source in sources}
             for future in as_completed(futures):
                 source = futures[future]
@@ -60,7 +93,7 @@ class FeedFetcher:
     def fetch_one(self, source: FeedSource) -> list[Vacancy]:
         """Завантажує й розбирає один фід. Помилка мережі → порожній список."""
         try:
-            response = requests.get(source.url, headers=self._headers, timeout=self._timeout)
+            response = self._session.get(source.url, timeout=self._timeout)
             response.raise_for_status()
         except requests.RequestException as exc:
             logger.warning("Помилка завантаження %s: %s", source.name, exc)
