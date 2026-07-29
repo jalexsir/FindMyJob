@@ -20,6 +20,7 @@ from .text import (
 # Перше слово — типовий службовий/функціональний маркер (не буває на початку
 # реальної назви компанії): займенники, сполучники, заголовки секцій тощо.
 GENERIC_LEADING_WORDS = {
+    "привіт", "вітаю", "вітаємо", "вже",  # "Привіт! Ми — …", "вже 25 років …"
     "можливість", "де", "коли", "яка", "який", "яке", "які",
     "що", "як", "чим", "і", "та", "а", "чи", "або", "не", "це", "хто",
     "ваша", "ваш", "ваші", "наш", "наша", "наші", "наший",
@@ -76,11 +77,22 @@ _SUBJECT_STOP_WORDS = {
     "проєкт", "проєкту", "продукт", "продукту",
 }
 
+# Лапки в класі символів навмисно: без них у «Група компаній «Промавтоматика»
+# вже 25 років працює» збіг починався б після закривальної лапки й давав
+# «вже 25 років». З ними назва потрапляє в кандидата цілком, а `_quoted_name`
+# лишає з нього саме те, що в лапках.
 _VERB_RE = re.compile(
-    r"([A-Za-zА-ЯҐЄІЇа-яґєії0-9][A-Za-zА-ЯҐЄІЇа-яґєії0-9\s\-\.&]{0,50}?)\s+(?:"
-    + "|".join(_ACTION_VERBS) + r")\b",
+    r"([A-Za-zА-ЯҐЄІЇа-яґєії0-9«»\"“”„][A-Za-zА-ЯҐЄІЇа-яґєії0-9\s\-\.&«»\"“”„]{0,50}?)"
+    r"\s+(?:" + "|".join(_ACTION_VERBS) + r")\b",
     re.IGNORECASE,
 )
+
+# Назва в лапках — найнадійніший сигнал: «Промавтоматика», "Acme Inc".
+_QUOTED_RE = re.compile(r"[«\"“„]\s*([^«»\"“”„]{2,60}?)\s*[»\"”]")
+
+# Привітання на початку опису: назва компанії стоїть праворуч від тире.
+_GREETINGS = {"привіт", "вітаю", "вітаємо", "hi", "hello", "hey"}
+_TRIM_CHARS = "'\"()!?,.:;«»„“”…-–—"
 
 # "Назва — опис" або "Назва is a/an/the ...". ЛИШЕ на початку абзацу і ЛИШЕ серед
 # перших абзаців: вступ про компанію завжди йде на самому початку, а по всьому
@@ -134,15 +146,21 @@ def is_invalid_company(text: str, title: str = "") -> bool:
     if _YEARS_RE.match(candidate.lower()):
         return True
 
+    # Назву компанії завжди пишуть з великої літери, тож кандидат, що
+    # починається з малої, — це уривок опису ("вже 25 років", "лідери ринку").
+    # Цифри й лапки на початку допустимі: «Промавтоматика», 414 окрема бригада.
+    if _starts_lowercase(candidate):
+        return True
+
     words = candidate.split()
-    first_word = words[0].lower().strip("'\"()") if words else ""
+    first_word = words[0].lower().strip(_TRIM_CHARS) if words else ""
     if first_word in GENERIC_LEADING_WORDS:
         return True
 
     # Самі лише займенники/загальні іменники ("Ми", "Наша команда") — це початок
     # опису, а не назва. Djinni-описи часто відкриваються "Ми — команда, яка…",
     # і патерн "<Назва> — опис" сумлінно віддає звідти "Ми".
-    if all(word.lower().strip("'\"(),.") in _SUBJECT_STOP_WORDS for word in words):
+    if all(word.lower().strip(_TRIM_CHARS) in _SUBJECT_STOP_WORDS for word in words):
         return True
 
     if title and _duplicates_title(candidate, title):
@@ -153,6 +171,12 @@ def is_invalid_company(text: str, title: str = "") -> bool:
 
     lowered = candidate.lower()
     return any(marker in lowered for marker in DESCRIPTION_MARKERS)
+
+
+def _starts_lowercase(candidate: str) -> bool:
+    """Чи починається текст з малої літери (лапки й цифри на початку — не рахуємо)."""
+    first = candidate.lstrip(_TRIM_CHARS)[:1]
+    return first.isalpha() and first.islower()
 
 
 def _duplicates_title(candidate: str, title: str) -> bool:
@@ -199,6 +223,10 @@ def is_invalid_dou_company(text: str, title: str = "") -> bool:
         return True
     if len(candidate) > MAX_DOU_COMPANY_LENGTH:
         return True
+    # Те саме правило великої літери. Цифри на початку тут особливо важливі:
+    # "414 окрема бригада безпілотних систем «Птахи Мадяра»" — валідна назва.
+    if _starts_lowercase(candidate):
+        return True
     if not title:
         return False
     if candidate.lower() == title.lower():
@@ -238,6 +266,8 @@ def _company_before_action_verb(paragraphs: list[str]) -> str:
             # Беремо лише останнє речення кандидата — перед дієсловом міг
             # опинитись хвіст попереднього.
             candidate = re.split(r"[\n\.\!:]", candidate)[-1].strip()
+            # "група компаній «Промавтоматика» вже 25 років" → "Промавтоматика"
+            candidate = _quoted_name(candidate) or candidate
             lowered = candidate.lower()
             if all(word in _SUBJECT_STOP_WORDS for word in lowered.split()):
                 continue
@@ -258,7 +288,41 @@ def _company_from_intro(paragraphs: list[str]) -> str:
         candidate = _TAG_ONLY_RE.sub("", match.group(1)).strip()
         if candidate and not is_invalid_company(candidate):
             return candidate
+        after_dash = _company_after_greeting(paragraph, match.end(), candidate)
+        if after_dash:
+            return after_dash
     return ""
+
+
+def _company_after_greeting(paragraph: str, dash_end: int, before_dash: str) -> str:
+    """«Привіт! Ми — Moodro» — назва стоїть ПРАВОРУЧ від тире, а не ліворуч.
+
+    Спрацьовує лише коли ліворуч самі привітання та займенники: інакше праворуч
+    від тире стоїть опис («HostZealot — хостинг…»), і брати його звідти не можна.
+    """
+    if not _is_greeting(before_dash):
+        return ""
+    tail = _TAG_ONLY_RE.sub("", paragraph[dash_end:])
+    candidate = re.split(r"[\n\.\!\?,:;]", tail)[0].strip()
+    candidate = _quoted_name(candidate) or candidate
+    # Велика літера тут вирішальна ("Ми — Moodro" проти "Вони — лідери ринку"),
+    # але перевіряє це вже is_invalid_company — правило спільне для всіх стратегій.
+    return "" if is_invalid_company(candidate) else candidate
+
+
+def _is_greeting(text: str) -> bool:
+    """Чи складається текст лише з привітань і займенників ("Привіт! Ми")."""
+    words = [word.lower().strip(_TRIM_CHARS) for word in text.split()]
+    words = [word for word in words if word]
+    return bool(words) and all(
+        word in _GREETINGS or word in _SUBJECT_STOP_WORDS for word in words
+    )
+
+
+def _quoted_name(text: str) -> str:
+    """Витягує назву з лапок — «Промавтоматика» → Промавтоматика."""
+    match = _QUOTED_RE.search(text)
+    return match.group(1).strip() if match else ""
 
 
 def trim_company_tagline(company: str) -> str:
