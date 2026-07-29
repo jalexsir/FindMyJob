@@ -146,6 +146,12 @@ def is_invalid_company(text: str, title: str = "") -> bool:
     if _YEARS_RE.match(candidate.lower()):
         return True
 
+    # Назву компанії завжди пишуть з великої літери, тож кандидат, що
+    # починається з малої, — це уривок опису ("вже 25 років", "лідери ринку").
+    # Цифри й лапки на початку допустимі: «Промавтоматика», 414 окрема бригада.
+    if _starts_lowercase(candidate):
+        return True
+
     words = candidate.split()
     first_word = words[0].lower().strip(_TRIM_CHARS) if words else ""
     if first_word in GENERIC_LEADING_WORDS:
@@ -165,6 +171,12 @@ def is_invalid_company(text: str, title: str = "") -> bool:
 
     lowered = candidate.lower()
     return any(marker in lowered for marker in DESCRIPTION_MARKERS)
+
+
+def _starts_lowercase(candidate: str) -> bool:
+    """Чи починається текст з малої літери (лапки й цифри на початку — не рахуємо)."""
+    first = candidate.lstrip(_TRIM_CHARS)[:1]
+    return first.isalpha() and first.islower()
 
 
 def _duplicates_title(candidate: str, title: str) -> bool:
@@ -210,6 +222,10 @@ def is_invalid_dou_company(text: str, title: str = "") -> bool:
     if candidate.endswith((":", ",", ".")):
         return True
     if len(candidate) > MAX_DOU_COMPANY_LENGTH:
+        return True
+    # Те саме правило великої літери. Цифри на початку тут особливо важливі:
+    # "414 окрема бригада безпілотних систем «Птахи Мадяра»" — валідна назва.
+    if _starts_lowercase(candidate):
         return True
     if not title:
         return False
@@ -289,11 +305,8 @@ def _company_after_greeting(paragraph: str, dash_end: int, before_dash: str) -> 
     tail = _TAG_ONLY_RE.sub("", paragraph[dash_end:])
     candidate = re.split(r"[\n\.\!\?,:;]", tail)[0].strip()
     candidate = _quoted_name(candidate) or candidate
-    # З великої літери — єдине, що відрізняє назву від звичайного іменника:
-    # "Ми — Moodro" проти "Вони — лідери ринку". Ціна помилки несиметрична,
-    # тож бренд із малої літери краще втратити, ніж підставити опис.
-    if not candidate[:1].isupper():
-        return ""
+    # Велика літера тут вирішальна ("Ми — Moodro" проти "Вони — лідери ринку"),
+    # але перевіряє це вже is_invalid_company — правило спільне для всіх стратегій.
     return "" if is_invalid_company(candidate) else candidate
 
 
