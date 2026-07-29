@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from telegram.constants import ParseMode
 
 from findmyjob.images import VacancyImageRenderer
@@ -10,6 +12,16 @@ from findmyjob.models import Vacancy
 from .formatting import format_vacancy
 from .keyboards import build_favorite_vacancy_keyboard, build_vacancy_keyboard
 from .state import UserState
+
+# Пауза між картками. Telegram притримує ботів, які сиплють в один чат без
+# упину, а пачка легко буває на кілька десятків карток — і при пошуку, і в
+# годинному сповіщенні. Півсекунди тримають потік рівним і не дають зловити 429.
+SEND_DELAY_SECONDS = 0.5
+
+
+async def pace() -> None:
+    """Пауза між двома повідомленнями однієї пачки."""
+    await asyncio.sleep(SEND_DELAY_SECONDS)
 
 
 class VacancySender:
@@ -45,6 +57,8 @@ class VacancySender:
         new_hashes: list[str] = []
 
         for number, data in enumerate(vacancies, 1):
+            if number > 1:
+                await pace()
             vacancy = Vacancy.from_dict(data)
             short_link = vacancy.short_link
             identity = vacancy.identity_hash

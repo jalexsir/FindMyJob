@@ -17,6 +17,7 @@ from findmyjob.bot.keyboards import (
     build_restore_keyboard, build_show_hidden_prompt_keyboard, build_unhide_keyboard,
     build_vacancy_keyboard,
 )
+from findmyjob.bot.sending import pace
 from findmyjob.bot.state import StateRepository, UserState
 from findmyjob.feeds import VacancyFeedService
 from findmyjob.images import VacancyImageRenderer
@@ -176,6 +177,8 @@ class HiddenHandlers(HandlerGroup):
         session.track(header.message_id)
 
         for number, (short_link, entry) in enumerate(hidden.items(), 1):
+            if number > 1:
+                await pace()
             title = entry.get("title", texts.DEFAULT_VACANCY_TITLE)
             message = await chat.send_photo(
                 photo=self._images.render(title, number),
