@@ -110,6 +110,14 @@ def build_notification_footer_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def build_notify_off_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Так/Ні на питання про вимкнення сповіщень."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_NOTIFY_OFF_NO),
+        InlineKeyboardButton(texts.BTN_YES, callback_data=cb.CB_NOTIFY_OFF_YES),
+    ]])
+
+
 def build_notifications_keyboard(subscribed: bool) -> InlineKeyboardMarkup:
     """Екран «Сповіщення»: налаштувати, а якщо підписка вже є — ще й вимкнути."""
     rows = [[InlineKeyboardButton(texts.BTN_NOTIFY_SETUP, callback_data=cb.CB_NOTIFY_SETUP)]]

@@ -24,7 +24,9 @@ CB_NOOP = "noop"                              # кнопка-індикатор 
 CB_RESELECT_CATS = "reselect_cats"
 CB_NOTIFY_SETUP = "notify_setup"              # почати вибір категорій сповіщень
 CB_NOTIFY_CONFIRM = "notify_confirm"          # "Додати нотифікацію"
-CB_NOTIFY_OFF = "notify_off"
+CB_NOTIFY_OFF = "notify_off"                  # запит підтвердження
+CB_NOTIFY_OFF_YES = "notify_off_yes"
+CB_NOTIFY_OFF_NO = "notify_off_no"
 
 # Дії з параметром — префікси, до яких дописується значення
 CB_CONFIRM_YES = "confirm_yes:"
