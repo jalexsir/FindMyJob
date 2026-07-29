@@ -13,15 +13,18 @@ from .formatting import format_vacancy
 from .keyboards import build_favorite_vacancy_keyboard, build_vacancy_keyboard
 from .state import UserState
 
-# Пауза між картками. Telegram притримує ботів, які сиплють в один чат без
-# упину, а пачка легко буває на кілька десятків карток — і при пошуку, і в
-# годинному сповіщенні. Півсекунди тримають потік рівним і не дають зловити 429.
-SEND_DELAY_SECONDS = 0.5
+# Пауза між картками ЛИШЕ при надсиланні списку вакансій. Telegram притримує
+# ботів, які сиплють в один чат без упину, а пачка легко буває на кілька
+# десятків карток — і при пошуку, і в годинному сповіщенні.
+#
+# На поодинокі повідомлення це не поширюється: відповіді на кнопки, редагування
+# карток і підсумкові рядки йдуть без затримки, бо там людина чекає реакції.
+LIST_SEND_DELAY_SECONDS = 0.3
 
 
 async def pace() -> None:
-    """Пауза між двома повідомленнями однієї пачки."""
-    await asyncio.sleep(SEND_DELAY_SECONDS)
+    """Пауза між двома сусідніми картками списку."""
+    await asyncio.sleep(LIST_SEND_DELAY_SECONDS)
 
 
 class VacancySender:
