@@ -145,6 +145,29 @@ FindMyJob — Telegram-бот для пошуку IT та Defence-tech вака�
 - Повторне налаштування **переписує** список, `🔕 Вимкнути сповіщення` — видаляє
   підписку цілком
 
+**Розсилка.** Щогодини з 8:00 до 20:00 (`Europe/Kyiv`) джоба збирає вакансії
+**за поточну дату** й надсилає ті, яких людина ще не бачила сьогодні:
+
+```
+08:00  фід: A B      журнал: —        → надсилаємо A B, журнал := A B
+09:00  фід: A B C    журнал: A B      → надсилаємо C,   журнал := A B C
+10:00  фід: A B C    журнал: A B C    → «На зараз не знайдено нових вакансій»
+```
+
+Журнал **накопичувальний**: якби з нього віднімали вже надіслане, вакансії
+попередньої години наступного разу знову виглядали б новими. Живе в SQLite
+(`notification_sent`), бо бот перезапускається на кожному деплої — список у
+пам'яті означав би повтори. О 3:00 записи за попередні дні видаляються.
+
+- **Один прохід на всіх**: категорії всіх підписників об'єднуються, фіди
+  тягнуться один раз. Десять підписників на Python — один набір RSS-запитів
+- Вилучені з пошуку не надсилаються; вакансія, що є в кількох обраних
+  категоріях, приходить однією карткою
+- Сповіщення **не чіпають мітку NEW** (`track_seen=False`) — інакше вони
+  «з'їдали» б її для ручного пошуку
+- Недоступний чат (бот заблокований) логується й не зупиняє розсилку решті
+- Під кожним сповіщенням — кнопка `🔕 Вимкнути сповіщення`
+
 ### Мітка NEW
 
 Вакансія вважається новою, якщо її хеш `(назва + компанія)` ще не потрапляв у
@@ -214,6 +237,7 @@ FindMyJob/
 │       ├── keyboards.py          — усі клавіатури
 │       ├── state.py              — UserState / ChatSession поверх bot_data
 │       ├── sending.py            — VacancySender: надсилання карток
+│       ├── notifier.py           — погодинна розсилка сповіщень
 │       └── handlers/             — обробники за сценаріями
 │           ├── base.py           — HandlerGroup: спільна база
 │           ├── categories.py     — вибір категорій (/start)
@@ -639,7 +663,7 @@ merge_by_title_and_company(name, primary, secondary) -> MergeResult
 `VacancyStore` (`findmyjob/storage.py`) — SQLite, файл `bot_storage.db`.
 
 ```python
-store.init_db()                          # CREATE TABLE IF NOT EXISTS ×4
+store.init_db()                          # CREATE TABLE IF NOT EXISTS ×5
 
 store.replace_hidden(user_id, data)      # data: {short_link: {...}}
 store.replace_favorites(user_id, data)
@@ -652,9 +676,14 @@ store.load_chat_anchors(chat_id) -> ChatAnchors
 store.save_subscription(user_id, chat_id, categories)
 store.delete_subscription(user_id)
 store.load_all_subscriptions() -> {user_id: NotificationSub}
+
+store.sent_today(user_id, day)   -> {short_link}
+store.mark_sent(user_id, day, short_links)
+store.purge_sent_before(day)     # нічне прибирання
+store.clear_sent(user_id)        # при вимкненні сповіщень
 ```
 
-Чотири таблиці. `hidden` і `favorites` — однакової схеми:
+П'ять таблиць. `hidden` і `favorites` — однакової схеми:
 
 ```sql
 CREATE TABLE IF NOT EXISTS hidden (
@@ -712,8 +741,21 @@ CREATE TABLE IF NOT EXISTS notification_subs (
 );
 ```
 
+П'ята — `notification_sent`, журнал надісланого за день:
+
+```sql
+CREATE TABLE IF NOT EXISTS notification_sent (
+    user_id    INTEGER NOT NULL,
+    day        TEXT    NOT NULL,   -- YYYY-MM-DD, робить очищення тривіальним
+    short_link TEXT    NOT NULL,
+    PRIMARY KEY (user_id, day, short_link)
+);
+```
+
+Первинний ключ робить повторне надсилання неможливим за побудовою.
+
 **Міграція не потрібна.** `init_db()` виконує `CREATE TABLE IF NOT EXISTS` для
-всіх чотирьох таблиць і є ідемпотентним: на наявній БД він лише додає нові,
+всіх п'яти таблиць і є ідемпотентним: на наявній БД він лише додає нові,
 не чіпаючи `hidden` і `favorites`.
 
 **Увімкнено WAL** (`PRAGMA journal_mode = WAL`) — читання не блокує запис.

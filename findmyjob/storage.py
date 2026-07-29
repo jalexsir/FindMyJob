@@ -68,10 +68,22 @@ CREATE TABLE IF NOT EXISTS notification_subs (
 );
 """
 
+# Журнал надісланого за день. Ключ (user_id, day, short_link) робить повторне
+# надсилання неможливим за побудовою, а `day` — очищення тривіальним.
+_NOTIFICATION_SENT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS notification_sent (
+    user_id    INTEGER NOT NULL,
+    day        TEXT    NOT NULL,
+    short_link TEXT    NOT NULL,
+    PRIMARY KEY (user_id, day, short_link)
+);
+"""
+
 _TABLE_HIDDEN = "hidden"
 _TABLE_FAVORITES = "favorites"
 _TABLE_CHAT_STATE = "chat_state"
 _TABLE_NOTIFICATION_SUBS = "notification_subs"
+_TABLE_NOTIFICATION_SENT = "notification_sent"
 
 
 @dataclass(frozen=True)
@@ -120,6 +132,7 @@ class VacancyStore:
             conn.execute(_SCHEMA.format(table=_TABLE_FAVORITES))
             conn.execute(_CHAT_STATE_SCHEMA)
             conn.execute(_NOTIFICATION_SUBS_SCHEMA)
+            conn.execute(_NOTIFICATION_SENT_SCHEMA)
 
     # ── Списки вакансій ──────────────────────────────────────────────────────
 
@@ -189,6 +202,50 @@ class VacancyStore:
             user_id: NotificationSub(user_id, chat_id, _load_categories(raw))
             for user_id, chat_id, raw in rows
         }
+
+    # ── Журнал надісланих сповіщень ──────────────────────────────────────────
+
+    def sent_today(self, user_id: int, day: str) -> set[str]:
+        """Що цьому користувачу вже надіслано сьогодні."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT short_link FROM {_TABLE_NOTIFICATION_SENT} "
+                f"WHERE user_id = ? AND day = ?",
+                (user_id, day),
+            ).fetchall()
+        return {row[0] for row in rows}
+
+    def mark_sent(self, user_id: int, day: str, short_links: Iterable[str]) -> None:
+        """Журнал накопичувальний: те, що вже надіслано, лишається до кінця дня.
+
+        Саме тому надіслане не «віднімається» від наступної вибірки, а додається
+        сюди — інакше вакансія з попередньої години наступного разу знову
+        виглядала б новою.
+        """
+        rows = [(user_id, day, link) for link in short_links]
+        if not rows:
+            return
+        with self._connect() as conn:
+            conn.executemany(
+                f"INSERT OR IGNORE INTO {_TABLE_NOTIFICATION_SENT} "
+                f"(user_id, day, short_link) VALUES (?, ?, ?)",
+                rows,
+            )
+
+    def purge_sent_before(self, day: str) -> int:
+        """Прибирає журнал за попередні дні. Повертає кількість видалених рядків."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"DELETE FROM {_TABLE_NOTIFICATION_SENT} WHERE day < ?", (day,)
+            )
+            return cursor.rowcount
+
+    def clear_sent(self, user_id: int) -> None:
+        """Повне очищення журналу користувача — при вимкненні сповіщень."""
+        with self._connect() as conn:
+            conn.execute(
+                f"DELETE FROM {_TABLE_NOTIFICATION_SENT} WHERE user_id = ?", (user_id,)
+            )
 
     # ── Внутрішні деталі ─────────────────────────────────────────────────────
 

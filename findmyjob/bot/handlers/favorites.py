@@ -139,7 +139,7 @@ class FavoriteHandlers(HandlerGroup):
             return
 
         session.track(*await self._sender.send_all(
-            query.message.chat, vacancies, state,
+            context.bot, query.message.chat_id, vacancies, state,
             force_favorite=True, from_favorites=True,
         ))
         message = await query.message.chat.send_message(

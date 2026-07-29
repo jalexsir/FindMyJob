@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from zoneinfo import ZoneInfo
 
 from telegram.ext import Application
 
@@ -10,6 +11,7 @@ from findmyjob.bot.handlers import (
     CategoryHandlers, FavoriteHandlers, HandlerGroup, HiddenHandlers,
     MaintenanceHandlers, MenuHandlers, NotificationHandlers, VacancyHandlers,
 )
+from findmyjob.bot.notifier import NotificationDispatcher
 from findmyjob.bot.sending import VacancySender
 from findmyjob.bot.state import (
     StateRepository, favorites_key, hidden_key, notifications_key,
@@ -20,6 +22,11 @@ from findmyjob.images import VacancyImageRenderer
 from findmyjob.storage import VacancyStore
 
 logger = logging.getLogger(__name__)
+
+# Сповіщення: щогодини з 8:00 до 20:00 за київським часом
+NOTIFICATIONS_TIMEZONE = "Europe/Kyiv"
+NOTIFICATIONS_FROM_HOUR = 8
+NOTIFICATIONS_TO_HOUR = 20
 
 
 class BotApplication:
@@ -44,6 +51,7 @@ class BotApplication:
         favorites = FavoriteHandlers(self._states, feeds, sender)
         notifications = NotificationHandlers(self._states)
         maintenance = MaintenanceHandlers(self._states)
+        self._notifier = NotificationDispatcher(self._states, feeds, sender)
 
         # Порядок груп = порядок реєстрації обробників. Патерни callback_data не
         # перетинаються, а от текстові обробники меню мають бути останніми.
@@ -69,7 +77,43 @@ class BotApplication:
             for handler in group.handlers():
                 application.add_handler(handler)
 
+        self._schedule_jobs(application)
         return application
+
+    def _schedule_jobs(self, application: Application) -> None:
+        """Погодинна розсилка сповіщень і нічне прибирання журналу.
+
+        Часовий пояс задається явно: сервер живе в UTC, і без цього «8 ранку»
+        перетворилося б на 11:00 за Києвом.
+        """
+        job_queue = application.job_queue
+        if job_queue is None:
+            logger.warning(
+                "JobQueue недоступна — сповіщення не працюватимуть. "
+                "Потрібен пакет python-telegram-bot[job-queue]."
+            )
+            return
+
+        timezone = ZoneInfo(NOTIFICATIONS_TIMEZONE)
+        job_queue.run_custom(
+            self._notifier.run,
+            job_kwargs={
+                "trigger": "cron",
+                "hour": f"{NOTIFICATIONS_FROM_HOUR}-{NOTIFICATIONS_TO_HOUR}",
+                "minute": 0,
+                "timezone": timezone,
+            },
+            name="notifications",
+        )
+        job_queue.run_custom(
+            self._notifier.purge,
+            job_kwargs={"trigger": "cron", "hour": 3, "minute": 0, "timezone": timezone},
+            name="notifications-purge",
+        )
+        logger.info(
+            "Сповіщення заплановано: щогодини %d:00–%d:00 (%s)",
+            NOTIFICATIONS_FROM_HOUR, NOTIFICATIONS_TO_HOUR, NOTIFICATIONS_TIMEZONE,
+        )
 
     def run(self) -> None:
         application = self.build()
