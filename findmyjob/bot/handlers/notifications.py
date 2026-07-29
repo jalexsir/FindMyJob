@@ -19,7 +19,7 @@ from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
 from findmyjob.bot.keyboards import (
     MAX_SELECTED_CATEGORIES, NOTIFY_FLOW, build_category_keyboard,
-    build_notifications_keyboard,
+    build_notifications_keyboard, build_notify_off_confirm_keyboard,
 )
 
 from .base import HandlerGroup
@@ -35,6 +35,12 @@ class NotificationHandlers(HandlerGroup):
             CallbackQueryHandler(self.change_page, pattern=cb.prefixed(cb.CB_NOTIFY_PAGE)),
             CallbackQueryHandler(self.confirm, pattern=cb.exact(cb.CB_NOTIFY_CONFIRM)),
             CallbackQueryHandler(self.disable, pattern=cb.exact(cb.CB_NOTIFY_OFF)),
+            CallbackQueryHandler(
+                self.confirm_disable, pattern=cb.exact(cb.CB_NOTIFY_OFF_YES)
+            ),
+            CallbackQueryHandler(
+                self.cancel_disable, pattern=cb.exact(cb.CB_NOTIFY_OFF_NO)
+            ),
         )
 
     # ── Вхід із меню ─────────────────────────────────────────────────────────
@@ -115,15 +121,33 @@ class NotificationHandlers(HandlerGroup):
     # ── Вимкнення ────────────────────────────────────────────────────────────
 
     async def disable(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Прибирає саму підписку, а не лише поточну розсилку."""
+        """Крок 1: питає підтвердження — разом із підпискою зникають і категорії."""
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text(
+            texts.MSG_NOTIFY_OFF_CONFIRM,
+            reply_markup=build_notify_off_confirm_keyboard(),
+        )
+
+    async def confirm_disable(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Крок 2: прибирає саму підписку, а не лише поточну розсилку."""
         query = update.callback_query
         await query.answer()
 
         self.user_state(update, context).unsubscribe_notifications()
         self.session(update, context).clear_notify_draft()
-        await query.edit_message_reply_markup(reply_markup=None)
-        message = await query.message.reply_text(texts.MSG_NOTIFY_OFF)
-        self.session(update, context).track(message.message_id)
+        await query.edit_message_text(texts.MSG_NOTIFY_OFF)
+
+    async def cancel_disable(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Крок 2 «Ні»: підписка ціла, повертаємо екран із кнопками вибору."""
+        query = update.callback_query
+        await query.answer()
+
+        subscribed = self.user_state(update, context).notification_categories
+        await query.edit_message_text(
+            texts.MSG_NOTIFY_OFF_CANCELLED,
+            reply_markup=build_notifications_keyboard(bool(subscribed)),
+        )
 
     @staticmethod
     async def _render(query, draft: list[str], page: int) -> None:
