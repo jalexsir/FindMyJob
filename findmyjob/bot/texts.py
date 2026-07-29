@@ -48,6 +48,7 @@ MSG_NOTIFY_INTRO = (
 )
 MSG_NOTIFY_PICK = "Оберіть одну або декілька категорій вакансій для сповіщення 👇"
 MSG_NOTIFY_OFF = "🔕 Сповіщення вимкнено. Увімкнути назад можна в меню «Сповіщення»."
+MSG_NOTIFY_NOTHING_NEW = "🔔 На зараз не знайдено нових вакансій"
 MSG_HIDDEN_EMPTY = "📭 Список вилучених вакансій порожній."
 MSG_HIDDEN_ALREADY_EMPTY = "📭 Список пустий"
 MSG_FAVORITES_EMPTY = "⭐ Список обраних вакансій порожній."
@@ -134,6 +135,11 @@ def notifications_intro(subscribed: list[str]) -> str:
         f"🔔 Сповіщення увімкнено для категорій: <b>{', '.join(subscribed)}</b>\n\n"
         "Перевіряю нові вакансії щогодини з 8:00 до 20:00."
     )
+
+
+def notifications_sent(count: int) -> str:
+    """Підсумок під пачкою карток. Без HTML — надсилається звичайним текстом."""
+    return f"🔔 Нових вакансій за сьогодні: {count} {vacancies_word(count)}"
 
 
 def notifications_saved(selected: list[str]) -> str:

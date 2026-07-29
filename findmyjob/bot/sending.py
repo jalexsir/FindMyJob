@@ -20,14 +20,22 @@ class VacancySender:
 
     async def send_all(
         self,
-        chat,
+        bot,
+        chat_id: int,
         vacancies: list[dict],
         state: UserState,
         *,
         force_favorite: bool = False,
         from_favorites: bool = False,
+        track_seen: bool = True,
     ) -> list[int]:
         """Нові вакансії позначаються NEW, обрані — зіркою.
+
+        Приймає `bot` і `chat_id`, а не об'єкт чату: шкедулер працює без апдейта,
+        і взяти звідкись `Chat` там немає де.
+
+        `track_seen=False` — не позначати вакансії переглянутими: сповіщення не
+        мають «з'їдати» мітку NEW у ручному пошуку.
 
         Повертає id надісланих повідомлень.
         """
@@ -49,7 +57,8 @@ class VacancySender:
             # Кешуємо повні дані — щоб hide/favorite/restore не тягли RSS заново
             state.cache_vacancy(short_link, data)
 
-            message = await chat.send_photo(
+            message = await bot.send_photo(
+                chat_id=chat_id,
                 photo=self._images.render(
                     vacancy.title, number, is_new=is_new, is_favorite=is_favorite
                 ),
@@ -62,5 +71,6 @@ class VacancySender:
             )
             message_ids.append(message.message_id)
 
-        state.mark_seen(new_hashes)
+        if track_seen:
+            state.mark_seen(new_hashes)
         return message_ids

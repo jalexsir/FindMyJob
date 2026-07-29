@@ -141,8 +141,10 @@ class UserState:
         self._store.save_subscription(self._user_id, chat_id, list(categories))
 
     def unsubscribe_notifications(self) -> None:
+        """Прибирає і підписку, і журнал надісланого — вмикання почне з чистого."""
         self._bot_data.pop(notifications_key(self._user_id), None)
         self._store.delete_subscription(self._user_id)
+        self._store.clear_sent(self._user_id)
 
 
 class ChatSession:

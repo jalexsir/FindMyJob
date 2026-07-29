@@ -103,6 +103,13 @@ def build_category_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
+def build_notification_footer_keyboard() -> InlineKeyboardMarkup:
+    """Кнопка під кожним сповіщенням — вихід має бути під рукою, а не в меню."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_NOTIFY_OFF, callback_data=cb.CB_NOTIFY_OFF)],
+    ])
+
+
 def build_notifications_keyboard(subscribed: bool) -> InlineKeyboardMarkup:
     """Екран «Сповіщення»: налаштувати, а якщо підписка вже є — ще й вимкнути."""
     rows = [[InlineKeyboardButton(texts.BTN_NOTIFY_SETUP, callback_data=cb.CB_NOTIFY_SETUP)]]

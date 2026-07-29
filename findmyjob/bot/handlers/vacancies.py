@@ -156,7 +156,9 @@ class VacancyHandlers(HandlerGroup):
             session.track(message.message_id)
             return
 
-        session.track(*await self._sender.send_all(query.message.chat, pending, state))
+        session.track(*await self._sender.send_all(
+            context.bot, query.message.chat_id, pending, state
+        ))
 
         days = self._parse_days(cb.argument(query.data, cb.CB_CONFIRM_YES))
         categories = ", ".join(state.categories or AVAILABLE_CATEGORIES)
