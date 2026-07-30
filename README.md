@@ -449,8 +449,8 @@ class FeedSource:
 Для кожної категорії — 4 (або 2, якщо Djinni-ключа немає):
 
 ```
-DOU (Deftech) {кат}        → …/feeds/?category={слаг}&search=miltech, {слаг}&descr=1
-DOU (бронювання) {кат}     → …/feeds/?category={слаг}&search=бронювання, {слаг}&descr=1
+DOU (Deftech) {кат}        → …/feeds/?category={слаг}&search=miltech, {слаг}
+DOU (бронювання) {кат}     → …/feeds/?category={слаг}&search=бронювання, {слаг}
 Djinni (Deftech) {кат}     → djinni.co/jobs/rss/?all_keywords={кл}&search_type={тип}&editorial=miltech
 Djinni (бронювання) {кат}  → djinni.co/jobs/rss/?all_keywords={кл}&search_type={тип}&editorial=reservation
 ```
@@ -463,15 +463,10 @@ DOU поєднує **фільтр по категорії** з **пошуком 
 Значення параметрів екрануються: інакше `category=C++` сайт прочитав би як
 `C` з двома пробілами.
 
-**Пошук по опису вмикається однаково на обох сайтах** — `descr=1` у DOU і
-`search_type=full-text` у Djinni — і для категорій із `BASIC_SEARCH_CATEGORIES`
-не вмикається зовсім (там `search_type=basic-search` і жодного `descr`). Наразі
-це `Support`: слово «support» трапляється в описі майже кожної вакансії, і пошук
-по тексту давав би суцільний шум.
-
-Виміряно на живому DOU-фіді: без `descr=1` видача не порожня, а рівно на одну
-вакансію менша — тобто параметр лише трохи розширює вибірку, і відмова від нього
-для окремих категорій нічого не ламає.
+`search_type` у Djinni залежить від категорії: `full-text` для всіх, крім
+перелічених у `BASIC_SEARCH_CATEGORIES` — там `basic-search`. Наразі це
+`Support`: слово «support» трапляється в описі майже кожної вакансії, і
+повнотекстовий пошук давав би суцільний шум.
 
 Приклад: 5 категорій → **20 паралельних HTTP-запитів** → 5 фінальних списків.
 
