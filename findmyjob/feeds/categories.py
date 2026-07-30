@@ -90,19 +90,22 @@ class FeedSource:
 
 
 def _dou_url(dou_category: str, variant: Variant, category: str) -> str:
-    """Пошук двома термами через кому замість фільтра по категорії.
+    """Фільтр по категорії ПЛЮС пошук двома термами через кому.
 
-    Було `?category=Golang&search=бронювання`, стало
-    `?search=бронювання, Golang`.
+    Формат узято з самого DOU — так виглядає стрічка, яку він генерує для
+    сторінки пошуку: `?category=Java&search=бронювання, java`. Категорія лишається
+    фільтром по таксономії, а не перетворюється на пошуковий терм; другим термом
+    вона дублюється в самому запиті, як це робить сайт.
 
-    `descr=1` (шукати ще й в описі) — це DOU-відповідник повнотекстового пошуку
-    Djinni, тож і виняток той самий: для категорій з `BASIC_SEARCH_CATEGORIES`
-    його не додаємо. Виміряно на живому фіді: без нього видача не порожня, а
-    рівно на одну вакансію менша — тобто параметр лише трохи розширює.
+    `descr=1` (шукати ще й в описі) — DOU-відповідник повнотекстового пошуку
+    Djinni, тож і виняток той самий: для `BASIC_SEARCH_CATEGORIES` не додаємо.
     """
     variant_term = "miltech" if variant is Variant.DEFTECH else "бронювання"
-    search = quote(f"{variant_term}, {dou_category}")
-    url = f"https://jobs.dou.ua/vacancies/feeds/?search={search}"
+    search = quote(f"{variant_term}, {dou_category.lower()}")
+    url = (
+        f"https://jobs.dou.ua/vacancies/feeds/"
+        f"?category={quote(dou_category)}&search={search}"
+    )
     return url if category in BASIC_SEARCH_CATEGORIES else f"{url}&descr=1"
 
 

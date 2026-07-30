@@ -449,14 +449,19 @@ class FeedSource:
 Для кожної категорії — 4 (або 2, якщо Djinni-ключа немає):
 
 ```
-DOU (Deftech) {кат}        → jobs.dou.ua/vacancies/feeds/?search=miltech, {слаг}&descr=1
-DOU (бронювання) {кат}     → jobs.dou.ua/vacancies/feeds/?search=бронювання, {слаг}&descr=1
+DOU (Deftech) {кат}        → …/feeds/?category={слаг}&search=miltech, {слаг}&descr=1
+DOU (бронювання) {кат}     → …/feeds/?category={слаг}&search=бронювання, {слаг}&descr=1
 Djinni (Deftech) {кат}     → djinni.co/jobs/rss/?all_keywords={кл}&search_type={тип}&editorial=miltech
 Djinni (бронювання) {кат}  → djinni.co/jobs/rss/?all_keywords={кл}&search_type={тип}&editorial=reservation
 ```
 
-DOU шукає **двома термами через кому** замість фільтра по категорії:
-`?category=Golang&search=бронювання` → `?search=бронювання, Golang`.
+DOU поєднує **фільтр по категорії** з **пошуком двома термами через кому** —
+формат узято з самої стрічки, яку DOU генерує для сторінки пошуку:
+`?category=Java&search=бронювання, java`. Категорія лишається фільтром по
+таксономії, а другим термом дублюється в запиті, як це робить сайт.
+
+Значення параметрів екрануються: інакше `category=C++` сайт прочитав би як
+`C` з двома пробілами.
 
 **Пошук по опису вмикається однаково на обох сайтах** — `descr=1` у DOU і
 `search_type=full-text` у Djinni — і для категорій із `BASIC_SEARCH_CATEGORIES`
