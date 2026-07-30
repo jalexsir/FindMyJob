@@ -38,8 +38,9 @@ FindMyJob — Telegram-бот для пошуку IT та Defence-tech вака�
 - Кнопка `▶️ Продовжити (N обрано)` з'являється тільки після вибору мінімум однієї
 - Постійне меню внизу з'являється лише після підтвердження
 
-Найпопулярніші мови (`Python`, `Java`, `C++`, `NET`, `PHP`, `Node.js`, `Golang`,
-`Rust`) навмисно стоять на початку списку — щоб потрапити на першу сторінку.
+Порядок списку визначає, що потрапить на першу сторінку: найпопулярніші мови
+(`Python`, `Java`, `C++`, `NET`, `Node.js`, `Golang`, `Rust`) плюс `Front End`,
+`AI/ML` і `Support`.
 
 ### Крок 2 — Меню пошуку
 
@@ -98,7 +99,7 @@ FindMyJob — Telegram-бот для пошуку IT та Defence-tech вака�
 📍 Місце роботи: Київ
 💰 Зарплата: 5000 $
 📅 Дата публікації: 20.07.2026
-🌐 Фільтр: DOU Deftech Python
+🌐 Фільтр: DOU (Deftech) Python
 ```
 
 **Кнопки:** `🔗 Відкрити вакансію` · `⭐ В обране` / `💛 В обраному` · `🙈 Не показувати`
@@ -349,7 +350,7 @@ class Vacancy:
     published: str = ""       # рядок дати ("20.07.2026" або RFC 2822, або "невідомо")
     pub_dt: datetime | None = None
     company: str = ""
-    location: str = ""        # місто, "Віддалено" або "не знайдено"
+    location: str = ""        # місто, "Віддалено" або "в посиланні"
     salary: str = ""
     vacancy_hash: str = ""    # хеш (назва + компанія), заповнюється при парсингу
     category: str = ""        # напр. "Java", проставляється на етапі 1
@@ -435,7 +436,7 @@ class FeedSource:
     url: str
 
     @property
-    def name(self) -> str:      # "DOU Deftech Python"
+    def name(self) -> str:      # "DOU (Deftech) Python"
         return f"{self.site.value} {self.variant.value} {self.category}"
 ```
 
@@ -448,10 +449,18 @@ class FeedSource:
 Для кожної категорії — 4 (або 2, якщо Djinni-ключа немає):
 
 ```
-DOU Deftech {кат}          → jobs.dou.ua/vacancies/feeds/?category={слаг}&search=miltech
+DOU (Deftech) {кат}        → jobs.dou.ua/vacancies/feeds/?category={слаг}&search=miltech
 DOU (бронювання) {кат}     → jobs.dou.ua/vacancies/feeds/?category={слаг}&search=бронювання
-Djinni Deftech {кат}       → djinni.co/jobs/rss/?all_keywords={кл}&search_type=basic-search&editorial=miltech
-Djinni (бронювання) {кат}  → djinni.co/jobs/rss/?all_keywords={кл}&search_type=basic-search&editorial=reservation
+Djinni (Deftech) {кат}     → djinni.co/jobs/rss/?all_keywords={кл}&search_type={тип}&editorial=miltech
+Djinni (бронювання) {кат}  → djinni.co/jobs/rss/?all_keywords={кл}&search_type={тип}&editorial=reservation
+```
+
+`search_type` залежить від категорії: `full-text` (шукає по всьому тексту
+вакансії) для всіх, крім перелічених у `BASIC_SEARCH_CATEGORIES` — там
+`basic-search`. Наразі це `Support`: слово «support» трапляється в описі майже
+кожної вакансії, і повнотекстовий пошук давав би суцільний шум.
+
+```
 ```
 
 Приклад: 5 категорій → **20 паралельних HTTP-запитів** → 5 фінальних списків.
@@ -485,8 +494,8 @@ FeedFetcher(timeout=15, parser=EntryParser(), headers=DEFAULT_HEADERS)
 ```
 Етап 0   FeedFetcher → сирі Vacancy по кожному FeedSource
 Етап 1   merge_by_link у межах сайту:
-             Djinni Deftech + Djinni (бронювання) → CategoryFeeds.djinni
-             DOU Deftech    + DOU (бронювання)    → CategoryFeeds.dou
+             Djinni (Deftech) + Djinni (бронювання) → CategoryFeeds.djinni
+             DOU (Deftech)    + DOU (бронювання)    → CategoryFeeds.dou
          ── кешується на 120 с, БЕЗ фільтру по даті ──
 Фільтр   _passes_date() на обох списках
 Етап 2   merge_by_title_and_company(dou, djinni) → MergedSource
@@ -635,7 +644,8 @@ HTML-опису. Тому основна складність не «витяг�
 
 Ключі перебираються **за спаданням довжини**, щоб `«кривому розі»` перевірилось
 раніше за коротші форми. Окремо розпізнається
-`«формат роботи: віддалено»` → `"Віддалено"`. Не знайдено → `"не знайдено"`.
+`«формат роботи: віддалено»` → `"Віддалено"`. Не знайдено → `"в посиланні"`:
+місто в описі є не завжди, і відсилання до самої вакансії корисніше за «немає».
 
 ---
 
@@ -647,7 +657,7 @@ HTML-опису. Тому основна складність не «витяг�
 | Рівень | Де | Ключ | Чому саме такий |
 |---|---|---|---|
 | 0 | всередині одного фіду | повний URL | той самий запис іноді приходить у RSS двічі |
-| 1 | у межах сайту (Deftech + бронювання) | повний URL | та сама вакансія має буквально той самий URL |
+| 1 | у межах сайту ((Deftech) + (бронювання)) | повний URL | та сама вакансія має буквально той самий URL |
 | 2 | між сайтами (DOU + Djinni) | `(dedup_key(title), dedup_key(company))` | різні сайти → різні URL навіть для однієї вакансії, порівнювати їх марно |
 
 ```python
