@@ -6,7 +6,8 @@ import re
 
 from .text import unescape_twice
 
-UNKNOWN_LOCATION = "не знайдено"
+# Місто визначити не вдалося — відсилаємо людину туди, де воно точно є.
+UNKNOWN_LOCATION = "в посиланні"
 REMOTE_LOCATION = "Віддалено"
 
 # Форма в тексті → нормальна назва міста
