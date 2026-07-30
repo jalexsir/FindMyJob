@@ -89,8 +89,16 @@ class FeedSource:
 
 
 def _dou_url(dou_category: str, variant: Variant) -> str:
-    search = "miltech" if variant is Variant.DEFTECH else quote("бронювання")
-    return f"https://jobs.dou.ua/vacancies/feeds/?category={dou_category}&search={search}"
+    """Пошук двома термами через кому замість фільтра по категорії.
+
+    Було `?category=Golang&search=бронювання`, стало
+    `?search=бронювання, Golang&descr=1`. `descr=1` тут обов'язковий: слово
+    «бронювання» майже ніколи не стоїть у назві вакансії, воно живе в описі,
+    тож без пошуку по опису варіант «бронювання» не повертав би нічого.
+    """
+    variant_term = "miltech" if variant is Variant.DEFTECH else "бронювання"
+    search = quote(f"{variant_term}, {dou_category}")
+    return f"https://jobs.dou.ua/vacancies/feeds/?search={search}&descr=1"
 
 
 def _djinni_url(keyword: str, variant: Variant, category: str) -> str:

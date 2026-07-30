@@ -449,19 +449,22 @@ class FeedSource:
 Для кожної категорії — 4 (або 2, якщо Djinni-ключа немає):
 
 ```
-DOU (Deftech) {кат}        → jobs.dou.ua/vacancies/feeds/?category={слаг}&search=miltech
-DOU (бронювання) {кат}     → jobs.dou.ua/vacancies/feeds/?category={слаг}&search=бронювання
+DOU (Deftech) {кат}        → jobs.dou.ua/vacancies/feeds/?search=miltech, {слаг}&descr=1
+DOU (бронювання) {кат}     → jobs.dou.ua/vacancies/feeds/?search=бронювання, {слаг}&descr=1
 Djinni (Deftech) {кат}     → djinni.co/jobs/rss/?all_keywords={кл}&search_type={тип}&editorial=miltech
 Djinni (бронювання) {кат}  → djinni.co/jobs/rss/?all_keywords={кл}&search_type={тип}&editorial=reservation
 ```
+
+DOU шукає **двома термами через кому** замість фільтра по категорії
+(`?category=Golang&search=бронювання` → `?search=бронювання, Golang&descr=1`).
+`descr=1` тут обов'язковий: слово «бронювання» майже ніколи не стоїть у назві
+вакансії, воно живе в описі — без пошуку по опису цей варіант не повертав би
+нічого.
 
 `search_type` залежить від категорії: `full-text` (шукає по всьому тексту
 вакансії) для всіх, крім перелічених у `BASIC_SEARCH_CATEGORIES` — там
 `basic-search`. Наразі це `Support`: слово «support» трапляється в описі майже
 кожної вакансії, і повнотекстовий пошук давав би суцільний шум.
-
-```
-```
 
 Приклад: 5 категорій → **20 паралельних HTTP-запитів** → 5 фінальних списків.
 
