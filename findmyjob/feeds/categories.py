@@ -52,7 +52,8 @@ DJINNI_KEYWORD_MAP = {
 }
 
 
-# Категорії, для яких повнотекстовий пошук Djinni дає більше шуму, ніж користі.
+# Категорії, для яких пошук по опису (Djinni full-text, DOU descr=1) дає більше
+# шуму, ніж користі: саме слово трапляється в описі майже кожної вакансії.
 BASIC_SEARCH_CATEGORIES = {"Support"}
 
 
@@ -88,17 +89,21 @@ class FeedSource:
         return f"{self.site.value} {self.variant.value} {self.category}"
 
 
-def _dou_url(dou_category: str, variant: Variant) -> str:
+def _dou_url(dou_category: str, variant: Variant, category: str) -> str:
     """Пошук двома термами через кому замість фільтра по категорії.
 
     Було `?category=Golang&search=бронювання`, стало
-    `?search=бронювання, Golang&descr=1`. `descr=1` тут обов'язковий: слово
-    «бронювання» майже ніколи не стоїть у назві вакансії, воно живе в описі,
-    тож без пошуку по опису варіант «бронювання» не повертав би нічого.
+    `?search=бронювання, Golang`.
+
+    `descr=1` (шукати ще й в описі) — це DOU-відповідник повнотекстового пошуку
+    Djinni, тож і виняток той самий: для категорій з `BASIC_SEARCH_CATEGORIES`
+    його не додаємо. Виміряно на живому фіді: без нього видача не порожня, а
+    рівно на одну вакансію менша — тобто параметр лише трохи розширює.
     """
     variant_term = "miltech" if variant is Variant.DEFTECH else "бронювання"
     search = quote(f"{variant_term}, {dou_category}")
-    return f"https://jobs.dou.ua/vacancies/feeds/?search={search}&descr=1"
+    url = f"https://jobs.dou.ua/vacancies/feeds/?search={search}"
+    return url if category in BASIC_SEARCH_CATEGORIES else f"{url}&descr=1"
 
 
 def _djinni_url(keyword: str, variant: Variant, category: str) -> str:
@@ -124,7 +129,9 @@ def build_sources_for_category(category: str) -> list[FeedSource]:
     djinni_keyword = DJINNI_KEYWORD_MAP.get(category, category.lower())
 
     sources = [
-        FeedSource(Site.DOU, variant, category, _dou_url(dou_category, variant))
+        FeedSource(
+            Site.DOU, variant, category, _dou_url(dou_category, variant, category)
+        )
         for variant in Variant
     ]
     if djinni_keyword:
