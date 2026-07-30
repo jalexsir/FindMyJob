@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from datetime import date
 
@@ -30,6 +31,15 @@ from findmyjob.storage import NotificationSub
 logger = logging.getLogger(__name__)
 
 TODAY_ONLY = 0  # days=0 → зріз рівно за поточну дату
+
+# Скільки чатів обслуговуємо одночасно. Усередині чату картки й далі йдуть
+# послідовно з паузою — паралелимо саме різні чати.
+#
+# Вісім, бо картка коштує ~0.55 с (0.25 с sendPhoto + 0.3 с пауза), тобто один
+# чат дає 1.8 повідомлення/с, а вісім — 14.5/с при глобальному ліміті Telegram
+# ~30/с. Порахували на моделі: 100 підписників по 50 карток — 6 хв замість 46,
+# і це вкладається в годину до наступного запуску.
+NOTIFY_CONCURRENCY = 8
 
 
 @dataclass(frozen=True)
@@ -75,10 +85,26 @@ class NotificationDispatcher:
 
         by_category = await self._fetch_today(categories)
         today = date.today().isoformat()
+        started = time.monotonic()
 
-        for sub in subscriptions.values():
-            batch = self._collect(sub, by_category, context, today)
-            await self._deliver(batch, context, today)
+        semaphore = asyncio.Semaphore(NOTIFY_CONCURRENCY)
+
+        async def serve(sub: NotificationSub) -> None:
+            async with semaphore:
+                batch = self._collect(sub, by_category, context, today)
+                await self._deliver(batch, context, today)
+
+        results = await asyncio.gather(
+            *(serve(sub) for sub in subscriptions.values()), return_exceptions=True
+        )
+        # Виняток в одного підписника не має ховати решту розсилки з логів.
+        for sub, result in zip(subscriptions.values(), results):
+            if isinstance(result, BaseException):
+                logger.warning(
+                    "[СПОВІЩЕННЯ] збій обробки користувача %s: %s", sub.user_id, result
+                )
+
+        logger.info("[СПОВІЩЕННЯ] прохід завершено за %.1f с", time.monotonic() - started)
 
     async def _fetch_today(self, categories: list[str]) -> dict[str, list[Vacancy]]:
         """Один похід у RSS на всіх підписників. Повертає {категорія: вакансії}."""
@@ -134,22 +160,30 @@ class NotificationDispatcher:
             await self._send_text(context, sub.chat_id, texts.MSG_NOTIFY_NOTHING_NEW)
             return
 
+        # Позначаємо кожну картку одразу після надсилання, а не пачку в кінці:
+        # якщо Telegram обірве розсилку посередині, доставлені не прийдуть удруге.
+        sent: list[str] = []
+
+        def remember(short_link: str) -> None:
+            sent.append(short_link)
+            self._states.store.mark_sent(sub.user_id, today, (short_link,))
+
         try:
             await self._sender.send_all(
                 context.bot, sub.chat_id, list(batch.vacancies.values()), state,
-                track_seen=False,
+                track_seen=False, on_sent=remember,
             )
         except Exception as exc:
             # Заблокований бот або закритий чат не має валити розсилку решті.
             logger.warning(
-                "[СПОВІЩЕННЯ] не вдалося надіслати користувачу %s: %s", sub.user_id, exc
+                "[СПОВІЩЕННЯ] користувач %s: обірвалось на %d з %d — %s",
+                sub.user_id, len(sent), len(batch.vacancies), exc,
             )
-            return
 
-        self._states.store.mark_sent(sub.user_id, today, batch.vacancies)
-        count = len(batch.vacancies)
-        logger.info("[СПОВІЩЕННЯ] користувач %s: надіслано %d", sub.user_id, count)
-        await self._send_text(context, sub.chat_id, texts.notifications_sent(count))
+        if not sent:
+            return
+        logger.info("[СПОВІЩЕННЯ] користувач %s: надіслано %d", sub.user_id, len(sent))
+        await self._send_text(context, sub.chat_id, texts.notifications_sent(len(sent)))
 
     @staticmethod
     async def _send_text(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str) -> None:
