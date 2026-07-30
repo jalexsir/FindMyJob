@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Callable
 
 from telegram.constants import ParseMode
 
@@ -43,6 +44,7 @@ class VacancySender:
         force_favorite: bool = False,
         from_favorites: bool = False,
         track_seen: bool = True,
+        on_sent: Callable[[str], None] | None = None,
     ) -> list[int]:
         """Нові вакансії позначаються NEW, обрані — зіркою.
 
@@ -51,6 +53,11 @@ class VacancySender:
 
         `track_seen=False` — не позначати вакансії переглянутими: сповіщення не
         мають «з'їдати» мітку NEW у ручному пошуку.
+
+        `on_sent` викликається одразу після кожної успішно надісланої картки з її
+        `short_link`. Потрібен розсилці: якщо Telegram обірве пачку посередині,
+        уже доставлені картки мають лишитись позначеними, інакше наступної
+        години вони прийдуть удруге.
 
         Повертає id надісланих повідомлень.
         """
@@ -87,6 +94,8 @@ class VacancySender:
                 ),
             )
             message_ids.append(message.message_id)
+            if on_sent is not None:
+                on_sent(short_link)
 
         if track_seen:
             state.mark_seen(new_hashes)
