@@ -11,9 +11,16 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
+from typing import Callable
 
 from findmyjob.feeds.fetcher import MAX_ATTEMPTS, FetchEvent
+
+# Через скільки мовчання джерела попереджаємо, що воно гальмує. П'ять секунд —
+# приблизно середина восьмисекундного таймауту: звичайний фетч укладається в
+# ~1.2 с, тож повідомлення прилетить лише коли справді щось не так.
+SLOW_AFTER_SECONDS = 5.0
 
 
 @dataclass
@@ -23,6 +30,7 @@ class _SourceState:
     pending: int
     failed: bool = False
     announced_attempts: set[int] = field(default_factory=set)
+    announced_slow: bool = False
 
 
 class SourceProgress:
@@ -32,7 +40,9 @@ class SourceProgress:
     викликачу: так її можна перевірити без Telegram.
     """
 
-    def __init__(self, sources) -> None:
+    def __init__(self, sources, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._started = clock()
         self._states: dict[tuple[str, str], _SourceState] = {}
         self._order: list[tuple[str, str]] = []
         for source in sources:
@@ -76,11 +86,34 @@ class SourceProgress:
             )
         return messages
 
+    def slow_reports(self) -> list[str]:
+        """Рядки про джерела, які мовчать довше за `SLOW_AFTER_SECONDS`.
+
+        Кажемо про кожне джерело один раз: людині досить знати, що затримка є і
+        через кого саме, а не отримувати нагадування щосекунди.
+        """
+        if self._clock() - self._started < SLOW_AFTER_SECONDS:
+            return []
+
+        messages = []
+        for key in self._order:
+            state = self._states[key]
+            if state.pending and not state.announced_slow:
+                state.announced_slow = True
+                messages.append(
+                    f"⏳ Почекай ще трошки, маємо затримку від джерела {self._name(key)}"
+                )
+        return messages
+
     @staticmethod
     def _key_of(source) -> tuple[str, str]:
         return source.site.value, source.variant.value
 
     @staticmethod
-    def _label(key: tuple[str, str]) -> str:
+    def _name(key: tuple[str, str]) -> str:
         site, variant = key
-        return f"{site} {variant} джерело"
+        return f"{site} {variant}"
+
+    @classmethod
+    def _label(cls, key: tuple[str, str]) -> str:
+        return f"{cls._name(key)} джерело"

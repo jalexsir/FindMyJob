@@ -262,6 +262,8 @@ class VacancyHandlers(HandlerGroup):
         )
 
         while not task.done() or not events.empty():
+            for line in progress.slow_reports():
+                await report(line)
             try:
                 event = events.get_nowait()
             except queue.Empty:
