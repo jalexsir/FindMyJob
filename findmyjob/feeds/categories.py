@@ -52,8 +52,8 @@ DJINNI_KEYWORD_MAP = {
 }
 
 
-# Категорії, для яких пошук по опису (Djinni full-text, DOU descr=1) дає більше
-# шуму, ніж користі: саме слово трапляється в описі майже кожної вакансії.
+# Категорії, для яких повнотекстовий пошук Djinni дає більше шуму, ніж користі:
+# саме слово трапляється в описі майже кожної вакансії.
 BASIC_SEARCH_CATEGORIES = {"Support"}
 
 
@@ -89,21 +89,20 @@ class FeedSource:
         return f"{self.site.value} {self.variant.value} {self.category}"
 
 
-def _dou_url(dou_category: str, variant: Variant, category: str) -> str:
-    """Пошук двома термами через кому замість фільтра по категорії.
+def _dou_url(dou_category: str, variant: Variant) -> str:
+    """Фільтр по категорії ПЛЮС пошук двома термами через кому.
 
-    Було `?category=Golang&search=бронювання`, стало
-    `?search=бронювання, Golang`.
-
-    `descr=1` (шукати ще й в описі) — це DOU-відповідник повнотекстового пошуку
-    Djinni, тож і виняток той самий: для категорій з `BASIC_SEARCH_CATEGORIES`
-    його не додаємо. Виміряно на живому фіді: без нього видача не порожня, а
-    рівно на одну вакансію менша — тобто параметр лише трохи розширює.
+    Формат узято з самого DOU — так виглядає стрічка, яку він генерує для
+    сторінки пошуку: `?category=Java&search=бронювання, java`. Категорія лишається
+    фільтром по таксономії, а другим термом дублюється в самому запиті, як це
+    робить сайт. `descr=1` не додаємо: у стрічках DOU його немає.
     """
     variant_term = "miltech" if variant is Variant.DEFTECH else "бронювання"
-    search = quote(f"{variant_term}, {dou_category}")
-    url = f"https://jobs.dou.ua/vacancies/feeds/?search={search}"
-    return url if category in BASIC_SEARCH_CATEGORIES else f"{url}&descr=1"
+    search = quote(f"{variant_term}, {dou_category.lower()}")
+    return (
+        f"https://jobs.dou.ua/vacancies/feeds/"
+        f"?category={quote(dou_category)}&search={search}"
+    )
 
 
 def _djinni_url(keyword: str, variant: Variant, category: str) -> str:
@@ -129,9 +128,7 @@ def build_sources_for_category(category: str) -> list[FeedSource]:
     djinni_keyword = DJINNI_KEYWORD_MAP.get(category, category.lower())
 
     sources = [
-        FeedSource(
-            Site.DOU, variant, category, _dou_url(dou_category, variant, category)
-        )
+        FeedSource(Site.DOU, variant, category, _dou_url(dou_category, variant))
         for variant in Variant
     ]
     if djinni_keyword:
