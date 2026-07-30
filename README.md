@@ -451,8 +451,8 @@ class FeedSource:
 ```
 DOU (Deftech) {кат}        → …/feeds/?category={слаг}&search=miltech, {слаг}
 DOU (бронювання) {кат}     → …/feeds/?category={слаг}&search=бронювання, {слаг}
-Djinni (Deftech) {кат}     → djinni.co/jobs/rss/?all_keywords={кл}&search_type={тип}&editorial=miltech
-Djinni (бронювання) {кат}  → djinni.co/jobs/rss/?all_keywords={кл}&search_type={тип}&editorial=reservation
+Djinni (Deftech) {кат}     → djinni.co/jobs/rss/?all_keywords={кл}&search_type=basic-search&editorial=miltech
+Djinni (бронювання) {кат}  → djinni.co/jobs/rss/?all_keywords={кл}&search_type=basic-search&editorial=reservation
 ```
 
 DOU поєднує **фільтр по категорії** з **пошуком двома термами через кому** —
@@ -463,10 +463,9 @@ DOU поєднує **фільтр по категорії** з **пошуком 
 Значення параметрів екрануються: інакше `category=C++` сайт прочитав би як
 `C` з двома пробілами.
 
-`search_type` у Djinni залежить від категорії: `full-text` для всіх, крім
-перелічених у `BASIC_SEARCH_CATEGORIES` — там `basic-search`. Наразі це
-`Support`: слово «support» трапляється в описі майже кожної вакансії, і
-повнотекстовий пошук давав би суцільний шум.
+Djinni шукає `search_type=basic-search` — по полях вакансії. `full-text`
+пробували: він тягне забагато вакансій, що до запиту стосунку не мають, бо
+ключове слово трапляється десь у тілі опису.
 
 Приклад: 5 категорій → **20 паралельних HTTP-запитів** → 5 фінальних списків.
 

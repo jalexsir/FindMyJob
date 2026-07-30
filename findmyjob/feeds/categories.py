@@ -52,11 +52,6 @@ DJINNI_KEYWORD_MAP = {
 }
 
 
-# Категорії, для яких повнотекстовий пошук Djinni дає більше шуму, ніж користі:
-# саме слово трапляється в описі майже кожної вакансії.
-BASIC_SEARCH_CATEGORIES = {"Support"}
-
-
 class Site(str, Enum):
     """Сайт-джерело вакансій. Значення входить у видиму назву джерела."""
 
@@ -105,21 +100,17 @@ def _dou_url(dou_category: str, variant: Variant) -> str:
     )
 
 
-def _djinni_url(keyword: str, variant: Variant, category: str) -> str:
+def _djinni_url(keyword: str, variant: Variant) -> str:
+    """Базовий пошук по полях, а не повнотекстовий.
+
+    `search_type=full-text` пробували — він тягне забагато вакансій, що до
+    запиту стосунку не мають: ключове слово трапляється десь у тілі опису.
+    """
     editorial = "miltech" if variant is Variant.DEFTECH else "reservation"
     return (
         f"https://djinni.co/jobs/rss/?all_keywords={quote(keyword)}"
-        f"&search_type={_djinni_search_type(category)}&editorial={editorial}"
+        f"&search_type=basic-search&editorial={editorial}"
     )
-
-
-def _djinni_search_type(category: str) -> str:
-    """Повнотекстовий пошук усюди, крім категорій із BASIC_SEARCH_CATEGORIES.
-
-    Для "Support" full-text дає забагато шуму: слово "support" трапляється в
-    описі майже кожної вакансії, тож там лишається базовий пошук по полях.
-    """
-    return "basic-search" if category in BASIC_SEARCH_CATEGORIES else "full-text"
 
 
 def build_sources_for_category(category: str) -> list[FeedSource]:
@@ -134,8 +125,7 @@ def build_sources_for_category(category: str) -> list[FeedSource]:
     if djinni_keyword:
         sources += [
             FeedSource(
-                Site.DJINNI, variant, category,
-                _djinni_url(djinni_keyword, variant, category),
+                Site.DJINNI, variant, category, _djinni_url(djinni_keyword, variant)
             )
             for variant in Variant
         ]
