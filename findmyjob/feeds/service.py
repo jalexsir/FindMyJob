@@ -24,7 +24,7 @@ from findmyjob.models import MergedSource, Vacancy
 from .categories import AVAILABLE_CATEGORIES, Site, Variant, build_sources
 from .dedup import merge_by_link, merge_by_title_and_company
 from .diagnostics import log_dedup, log_vacancy_list
-from .fetcher import FeedFetcher
+from .fetcher import FeedFetcher, FetchEvent, FetchListener
 
 DEFAULT_CACHE_TTL_SECONDS = 120
 
@@ -52,12 +52,19 @@ class VacancyFeedService:
         self._cache = _Stage1Cache(cache_ttl_seconds)
 
     def fetch(
-        self, days: int | None = None, categories: list[str] | None = None
+        self,
+        days: int | None = None,
+        categories: list[str] | None = None,
+        on_event: FetchListener | None = None,
     ) -> list[MergedSource]:
         """Повертає по одному злитому списку вакансій на кожну категорію.
 
         `days=None` — без фільтру по даті. Блокуючий виклик (мережа): з
         асинхронного коду запускати через `asyncio.to_thread`.
+
+        `on_event` отримує подію на кожну спробу завантаження — це те, з чого
+        бот показує стан по джерелах. При влученні в кеш мережі не було, тож
+        події синтезуються як успішні: дані все одно щойно звідти й приїхали.
         """
         active_categories = categories or AVAILABLE_CATEGORIES
         cache_key = tuple(sorted(active_categories))
@@ -65,8 +72,11 @@ class VacancyFeedService:
         stage1 = self._cache.get(cache_key)
         from_cache = stage1 is not None
         if stage1 is None:
-            stage1 = self._build_stage1(active_categories)
+            stage1 = self._build_stage1(active_categories, on_event)
             self._cache.put(cache_key, stage1)
+        elif on_event is not None:
+            for source in build_sources(active_categories):
+                on_event(FetchEvent(source=source, attempt=1, ok=True))
 
         log_dedup(
             "ЕТАП 2 (%s, %s)",
@@ -82,9 +92,11 @@ class VacancyFeedService:
 
     # ── Етапи ────────────────────────────────────────────────────────────────
 
-    def _build_stage1(self, categories: list[str]) -> Stage1:
+    def _build_stage1(
+        self, categories: list[str], on_event: FetchListener | None = None
+    ) -> Stage1:
         """Етап 0 (сирі дані) + Етап 1 (внутрішньосайтове злиття за посиланням)."""
-        raw = self._fetcher.fetch_all(build_sources(categories))
+        raw = self._fetcher.fetch_all(build_sources(categories), on_event)
 
         log_dedup("ЕТАП 0: Сирі дані")
         for source, vacancies in raw.items():
