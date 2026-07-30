@@ -93,7 +93,7 @@ def _djinni_url(keyword: str, variant: Variant) -> str:
     editorial = "miltech" if variant is Variant.DEFTECH else "reservation"
     return (
         f"https://djinni.co/jobs/rss/?all_keywords={quote(keyword)}"
-        f"&search_type=basic-search&editorial={editorial}"
+        f"&search_type=full-text&editorial={editorial}"
     )
 
 
