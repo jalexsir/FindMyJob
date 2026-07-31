@@ -38,6 +38,9 @@ DISPLAY_ORDER = [
     for variant in (Variant.DEFTECH, Variant.RESERVATION)
 ]
 
+# Роздільник між джерелами в рядку стану.
+SEPARATOR = " : "
+
 Key = tuple[Site, Variant]
 
 
@@ -81,8 +84,8 @@ class SourceProgress:
         return len(self._states)
 
     def status_line(self) -> str:
-        """Рядок виду `Djinni I ⏳ | Djinni II ✅ | DOU I 🔄 | DOU II ❌`."""
-        return " | ".join(
+        """Рядок виду `Djinni I ⏳ : Djinni II ✅ : DOU I 🔄 : DOU II ❌`."""
+        return SEPARATOR.join(
             f"{self._name(key)} {self._states[key].icon}"
             for key in DISPLAY_ORDER
             if key in self._states
