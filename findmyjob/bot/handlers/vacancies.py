@@ -88,7 +88,9 @@ class VacancyHandlers(HandlerGroup):
         session.track(waiting.message_id)
 
         selection = await self._prepare(
-            update, context, days, report=self._reporter(session, message.reply_text)
+            update, context, days,
+            report=self._reporter(session, message.reply_text),
+            status=self._status_updater(session, message.reply_text),
         )
 
         text, keyboard = self._summary_message(selection, days)
@@ -190,11 +192,12 @@ class VacancyHandlers(HandlerGroup):
         context: ContextTypes.DEFAULT_TYPE,
         days: int | None,
         report: Reporter | None = None,
+        status: Reporter | None = None,
     ) -> VacancySelection:
         """Фетчить вакансії, прибирає вилучені, впорядковує та кладе в сесію."""
         state = self.user_state(update, context)
         categories = state.categories or None
-        sources = await self._fetch(categories, days, report)
+        sources = await self._fetch(categories, days, report, status)
 
         hidden_count = self._remove_hidden(sources, state)
         vacancies = sorted(
@@ -244,7 +247,11 @@ class VacancyHandlers(HandlerGroup):
     # ── Завантаження зі звітом по джерелах ───────────────────────────────────
 
     async def _fetch(
-        self, categories: list[str] | None, days: int | None, report: Reporter | None
+        self,
+        categories: list[str] | None,
+        days: int | None,
+        report: Reporter | None,
+        status: Reporter | None = None,
     ):
         """Фетч у робочому потоці; поки він іде — транслюємо його події в чат.
 
@@ -261,6 +268,11 @@ class VacancyHandlers(HandlerGroup):
             asyncio.to_thread(self._feeds.fetch, days, categories, events.put)
         )
 
+        async def refresh() -> None:
+            if status is not None:
+                await status(progress.status_line())
+
+        await refresh()
         while not task.done() or not events.empty():
             for line in progress.slow_reports():
                 await report(line)
@@ -271,7 +283,9 @@ class VacancyHandlers(HandlerGroup):
                 continue
             for line in progress.consume(event):
                 await report(line)
+            await refresh()
 
+        await refresh()
         return await task
 
     def _reporter(self, session, reply) -> Reporter:
@@ -280,6 +294,33 @@ class VacancyHandlers(HandlerGroup):
             message = await reply(line)
             session.track(message.message_id)
         return send
+
+    def _status_updater(self, session, reply) -> Reporter:
+        """Тримає ОДНЕ повідомлення зі станом джерел і редагує його на місці.
+
+        Перший виклик надсилає повідомлення, наступні — правлять його. Текст без
+        змін не надсилаємо: Telegram відповідає на таке помилкою.
+        """
+        holder: dict[str, object] = {}
+
+        async def update(line: str) -> None:
+            if holder.get("text") == line:
+                return
+            holder["text"] = line
+            message = holder.get("message")
+            if message is None:
+                message = await reply(line)
+                holder["message"] = message
+                session.track(message.message_id)
+                return
+            try:
+                await message.edit_text(line)
+            except Exception:
+                # Правка могла не пройти (повідомлення видалили) — не привід
+                # валити пошук: далі просто не оновлюємо рядок.
+                pass
+
+        return update
 
     # ── Допоміжне ────────────────────────────────────────────────────────────
 
