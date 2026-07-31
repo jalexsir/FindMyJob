@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import queue
 from dataclasses import dataclass
 from datetime import date
-from typing import Sequence
+from typing import Awaitable, Callable, Sequence
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -17,14 +18,22 @@ from findmyjob.bot.formatting import build_summary
 from findmyjob.bot.keyboards import (
     build_category_keyboard, build_confirm_show_keyboard, build_no_vacancies_keyboard,
 )
+from findmyjob.bot.progress import SourceProgress
 from findmyjob.bot.sending import VacancySender
 from findmyjob.bot.state import StateRepository, UserState
 from findmyjob.feeds import AVAILABLE_CATEGORIES, VacancyFeedService
+from findmyjob.feeds.categories import build_sources
 from findmyjob.models import Vacancy
 
 from .base import HandlerGroup
 
 ALL_TIME = "all"
+
+# Кожен рядок звіту про джерело надсилається окремим повідомленням.
+Reporter = Callable[[str], Awaitable[None]]
+
+# Як часто перевіряти чергу подій від фетчера, поки він працює у фоні.
+PROGRESS_POLL_SECONDS = 0.2
 
 
 @dataclass(frozen=True)
@@ -75,18 +84,12 @@ class VacancyHandlers(HandlerGroup):
             await self._prompt_categories(update, context, message.reply_text)
             return
 
-        waiting = await message.reply_text(texts.MSG_LOADING)
+        waiting = await message.reply_text(texts.MSG_FETCHING)
         session.track(waiting.message_id)
 
-        selection = await self._prepare(update, context, days)
-
-        # Прибираємо "зачекай..." і відправляємо результат новим повідомленням
-        try:
-            await context.bot.delete_message(
-                chat_id=message.chat_id, message_id=waiting.message_id
-            )
-        except Exception:
-            pass
+        selection = await self._prepare(
+            update, context, days, report=self._reporter(session, message.reply_text)
+        )
 
         text, keyboard = self._summary_message(selection, days)
         answer = await message.reply_text(
@@ -182,13 +185,16 @@ class VacancyHandlers(HandlerGroup):
     # ── Ядро: завантаження й підготовка вибірки ──────────────────────────────
 
     async def _prepare(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE, days: int | None
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        days: int | None,
+        report: Reporter | None = None,
     ) -> VacancySelection:
         """Фетчить вакансії, прибирає вилучені, впорядковує та кладе в сесію."""
         state = self.user_state(update, context)
-        sources = await asyncio.to_thread(
-            self._feeds.fetch, days, state.categories or None
-        )
+        categories = state.categories or None
+        sources = await self._fetch(categories, days, report)
 
         hidden_count = self._remove_hidden(sources, state)
         vacancies = sorted(
@@ -234,6 +240,46 @@ class VacancyHandlers(HandlerGroup):
         if hidden_changed:
             state.save_hidden()
         return len(removed)
+
+    # ── Завантаження зі звітом по джерелах ───────────────────────────────────
+
+    async def _fetch(
+        self, categories: list[str] | None, days: int | None, report: Reporter | None
+    ):
+        """Фетч у робочому потоці; поки він іде — транслюємо його події в чат.
+
+        Фетчер сигналить із робочих потоків, тому події складаються в
+        `queue.Queue` (вона потокобезпечна), а надсилає їх уже цей цикл — з
+        єдиного потоку, де живе Telegram-клієнт.
+        """
+        if report is None:
+            return await asyncio.to_thread(self._feeds.fetch, days, categories)
+
+        events: queue.Queue = queue.Queue()
+        progress = SourceProgress(build_sources(categories or AVAILABLE_CATEGORIES))
+        task = asyncio.create_task(
+            asyncio.to_thread(self._feeds.fetch, days, categories, events.put)
+        )
+
+        while not task.done() or not events.empty():
+            for line in progress.slow_reports():
+                await report(line)
+            try:
+                event = events.get_nowait()
+            except queue.Empty:
+                await asyncio.sleep(PROGRESS_POLL_SECONDS)
+                continue
+            for line in progress.consume(event):
+                await report(line)
+
+        return await task
+
+    def _reporter(self, session, reply) -> Reporter:
+        """Надсилає рядок звіту окремим повідомленням і бере його на облік."""
+        async def send(line: str) -> None:
+            message = await reply(line)
+            session.track(message.message_id)
+        return send
 
     # ── Допоміжне ────────────────────────────────────────────────────────────
 

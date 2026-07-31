@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Sequence
+from dataclasses import dataclass
+from typing import Callable, Sequence
 
 import feedparser
 import requests
@@ -18,7 +20,7 @@ from .parsing import EntryParser
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT = 15
+DEFAULT_TIMEOUT = 8
 # Стеля потоків. Без неї пул дорівнював би кількості джерел, а вона росте разом
 # із кількістю категорій: для всіх 33 це 130 потоків і стільки ж одночасних
 # з'єднань до двох хостів — на 1 OCPU і зайва пам'ять, і привід для сайтів
@@ -29,6 +31,13 @@ DEFAULT_TIMEOUT = 15
 # стелі, тоді як при 8 було б 1.8 с). Джоба зі всіма категоріями відпрацює за
 # ~7 с замість ~1 с, але вона годинна, і там це не має значення.
 MAX_PARALLEL_FEEDS = 12
+
+# Джерело, що не відповіло, пробуємо ще двічі. Сім секунд — щоб перечекати
+# коротку недоступність, але не тримати людину в очікуванні надто довго:
+# у найгіршому випадку одне джерело коштує 3×8 с таймауту + 2×7 с паузи ≈ 38 с.
+MAX_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 7
+
 DEFAULT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -36,6 +45,26 @@ DEFAULT_HEADERS = {
         "Chrome/120.0.0.0 Safari/537.36"
     )
 }
+
+
+@dataclass(frozen=True)
+class FetchEvent:
+    """Підсумок однієї спроби завантажити одне джерело.
+
+    `ok=False` разом з `attempt < MAX_ATTEMPTS` означає, що зараз буде повтор.
+    """
+
+    source: FeedSource
+    attempt: int
+    ok: bool
+
+    @property
+    def will_retry(self) -> bool:
+        return not self.ok and self.attempt < MAX_ATTEMPTS
+
+
+# Викликається з робочих потоків, тож приймач має бути потокобезпечним.
+FetchListener = Callable[[FetchEvent], None]
 
 
 def worker_count(source_count: int) -> int:
@@ -77,28 +106,61 @@ class FeedFetcher:
             self._local.session = session
         return session
 
-    def fetch_all(self, sources: Sequence[FeedSource]) -> dict[FeedSource, list[Vacancy]]:
-        """Завантажує всі джерела паралельно. Без фільтру по даті."""
+    def fetch_all(
+        self, sources: Sequence[FeedSource], on_event: FetchListener | None = None
+    ) -> dict[FeedSource, list[Vacancy]]:
+        """Завантажує всі джерела паралельно. Без фільтру по даті.
+
+        `on_event` отримує по події на кожну спробу — з робочого потоку.
+        """
         if not sources:
             return {}
 
         results: dict[FeedSource, list[Vacancy]] = {}
         with ThreadPoolExecutor(max_workers=worker_count(len(sources))) as executor:
-            futures = {executor.submit(self.fetch_one, source): source for source in sources}
+            futures = {
+                executor.submit(self.fetch_one, source, on_event): source
+                for source in sources
+            }
             for future in as_completed(futures):
                 source = futures[future]
                 results[source] = self._drop_repeated_links(source, future.result())
         return results
 
-    def fetch_one(self, source: FeedSource) -> list[Vacancy]:
-        """Завантажує й розбирає один фід. Помилка мережі → порожній список."""
+    def fetch_one(
+        self, source: FeedSource, on_event: FetchListener | None = None
+    ) -> list[Vacancy]:
+        """Завантажує й розбирає один фід, з повторами при помилці.
+
+        Вичерпані спроби → порожній список: одне впале джерело не має валити
+        всю вибірку, решта показується як є.
+        """
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            response = self._attempt(source, attempt)
+            ok = response is not None
+            if on_event is not None:
+                on_event(FetchEvent(source=source, attempt=attempt, ok=ok))
+            if ok:
+                return self._parse(source, response)
+            if attempt < MAX_ATTEMPTS:
+                time.sleep(RETRY_DELAY_SECONDS)
+        return []
+
+    def _attempt(self, source: FeedSource, attempt: int):
+        """Один похід у мережу. Повертає відповідь або None при помилці."""
         try:
             response = self._session.get(source.url, timeout=self._timeout)
             response.raise_for_status()
+            return response
         except requests.RequestException as exc:
-            logger.warning("Помилка завантаження %s: %s", source.name, exc)
-            return []
+            logger.warning(
+                "Помилка завантаження %s (спроба %d/%d): %s",
+                source.name, attempt, MAX_ATTEMPTS, exc,
+            )
+            return None
 
+    def _parse(self, source: FeedSource, response) -> list[Vacancy]:
+        """Розбирає вже отриману відповідь у список вакансій."""
         log_feed(
             "[%s] HTTP %s | %d байт | %s\n%s",
             source.name, response.status_code, len(response.content), source.url,
