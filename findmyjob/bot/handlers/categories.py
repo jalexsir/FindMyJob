@@ -36,6 +36,9 @@ class CategoryHandlers(HandlerGroup):
         session.category_page = 0
         self.user_state(update, context).set_categories([])
 
+        intro = await update.message.reply_text(texts.MSG_INTRO, parse_mode=ParseMode.HTML)
+        session.track(intro.message_id)
+
         message = await update.message.reply_text(
             texts.categories_status([]),
             parse_mode=ParseMode.HTML,
