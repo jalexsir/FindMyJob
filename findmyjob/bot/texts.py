@@ -18,8 +18,8 @@ ALL_BUTTON_TEXTS = (
 )
 
 # ── Підписи інлайн-кнопок ─────────────────────────────────────────────────────
-BTN_OPEN_VACANCY = "🔗 Відкрити вакансію"
-BTN_FIND_ON_DJINNI = "🔎 Знайти в Djinni"
+BTN_OPEN_VACANCY = "🔗 Відкрити"
+BTN_FIND_ON_DJINNI = "🔎 Знайти"
 BTN_ADD_FAVORITE = "⭐ В обране"
 BTN_ADD_FAVORITE_ALT = "⭐ Додати в обране"
 BTN_IN_FAVORITES = "💛 В обраному"
