@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import quote
 
 from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup,
 )
 
-from findmyjob.feeds import AVAILABLE_CATEGORIES
+from findmyjob.feeds import AVAILABLE_CATEGORIES, Site
 from findmyjob.models import Vacancy
 
 from . import callbacks as cb
@@ -140,6 +141,25 @@ def _pagination_row(
     return row
 
 
+def _djinni_search_url(vacancy: Vacancy) -> str:
+    """Google-пошук цієї ж вакансії на Djinni за назвою й компанією.
+
+    DOU не показує компанію структуровано на власній сторінці вакансії так
+    зручно, як хотілось би, тож для вакансій із DOU даємо швидкий шлях
+    перевірити, чи є той самий запис на Djinni.
+    """
+    query = f'site:djinni.co inurl:jobs "{vacancy.title}" {vacancy.company}'
+    return f"https://www.google.com/search?q={quote(query)}"
+
+
+def _open_vacancy_row(vacancy: Vacancy) -> list[InlineKeyboardButton]:
+    """Рядок з посиланням на вакансію, а для DOU — ще й пошуком на Djinni."""
+    row = [InlineKeyboardButton(texts.BTN_OPEN_VACANCY, url=vacancy.link)]
+    if vacancy.source.startswith(Site.DOU.value):
+        row.append(InlineKeyboardButton(texts.BTN_FIND_ON_DJINNI, url=_djinni_search_url(vacancy)))
+    return row
+
+
 def build_vacancy_keyboard(vacancy: Vacancy, is_favorite: bool = False) -> InlineKeyboardMarkup:
     """Клавіатура під карткою вакансії у звичайному списку."""
     short_link = vacancy.short_link
@@ -150,7 +170,7 @@ def build_vacancy_keyboard(vacancy: Vacancy, is_favorite: bool = False) -> Inlin
         ),
     )
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(texts.BTN_OPEN_VACANCY, url=vacancy.link)],
+        _open_vacancy_row(vacancy),
         [favorite_button,
          InlineKeyboardButton(texts.BTN_HIDE, callback_data=cb.payload(cb.CB_HIDE, short_link))],
     ])
@@ -160,7 +180,7 @@ def build_favorite_vacancy_keyboard(vacancy: Vacancy) -> InlineKeyboardMarkup:
     """Клавіатура для вакансії зі списку Обраних — з кнопкою видалення."""
     short_link = vacancy.short_link
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(texts.BTN_OPEN_VACANCY, url=vacancy.link)],
+        _open_vacancy_row(vacancy),
         [InlineKeyboardButton(texts.BTN_REMOVE_FAVORITE,
                               callback_data=cb.payload(cb.CB_FAV_DELETE, short_link))],
         [InlineKeyboardButton(texts.BTN_HIDE,
