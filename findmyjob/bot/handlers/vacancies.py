@@ -35,6 +35,12 @@ Reporter = Callable[[str], Awaitable[None]]
 # Як часто перевіряти чергу подій від фетчера, поки він працює у фоні.
 PROGRESS_POLL_SECONDS = 0.2
 
+# Пауза між видимими змінами рядка стану. Фетч усіх джерел укладається приблизно
+# в секунду, тож без неї всі значки перемкнулися б одночасно і людина просто не
+# побачила б, що саме відбувалося. Пауза припадає на дедуплікацію, яка все одно
+# триває після завантаження, тож майже нічого не додає до загального часу.
+STATUS_STEP_SECONDS = 0.4
+
 
 @dataclass(frozen=True)
 class VacancySelection:
@@ -268,11 +274,20 @@ class VacancyHandlers(HandlerGroup):
             asyncio.to_thread(self._feeds.fetch, days, categories, events.put)
         )
 
-        async def refresh() -> None:
-            if status is not None:
-                await status(progress.status_line())
+        shown = progress.status_line()
+        if status is not None:
+            await status(shown)
 
-        await refresh()
+        async def refresh() -> None:
+            """Показує рядок, якщо він змінився, і витримує паузу після зміни."""
+            nonlocal shown
+            line = progress.status_line()
+            if line == shown or status is None:
+                return
+            shown = line
+            await status(line)
+            await asyncio.sleep(STATUS_STEP_SECONDS)
+
         while not task.done() or not events.empty():
             for line in progress.slow_reports():
                 await report(line)
