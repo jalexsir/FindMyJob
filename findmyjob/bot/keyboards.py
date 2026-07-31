@@ -153,10 +153,11 @@ def _djinni_search_url(vacancy: Vacancy) -> str:
 
 
 def _open_vacancy_row(vacancy: Vacancy) -> list[InlineKeyboardButton]:
-    """Рядок з посиланням на вакансію, а для DOU — ще й пошуком на Djinni."""
-    row = [InlineKeyboardButton(texts.BTN_OPEN_VACANCY, url=vacancy.link)]
+    """Рядок з посиланням на вакансію, а для DOU — ще й пошуком на Djinni зліва."""
+    row = []
     if vacancy.source.startswith(Site.DOU.value):
         row.append(InlineKeyboardButton(texts.BTN_FIND_ON_DJINNI, url=_djinni_search_url(vacancy)))
+    row.append(InlineKeyboardButton(texts.BTN_OPEN_VACANCY, url=vacancy.link))
     return row
 
 
