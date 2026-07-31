@@ -68,6 +68,11 @@ class MaintenanceHandlers(HandlerGroup):
         self.user_state(update, context).set_categories([])
         session.category_page = 0
 
+        intro = await context.bot.send_message(
+            chat_id=chat_id, text=texts.MSG_INTRO, parse_mode=ParseMode.HTML
+        )
+        session.track(intro.message_id)
+
         message = await context.bot.send_message(
             chat_id=chat_id,
             text=texts.categories_status([]),
