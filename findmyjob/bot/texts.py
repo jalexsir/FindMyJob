@@ -166,7 +166,8 @@ def notifications_intro(subscribed: list[str]) -> str:
 
 def notifications_sent(count: int) -> str:
     """Підсумок під пачкою карток. Без HTML — надсилається звичайним текстом."""
-    return f"🔔 Нових вакансій за сьогодні: {count} {vacancies_word(count)}"
+    new_word = pluralize_ua(count, "нова", "нові", "нових")
+    return f"🔔 Є {count} {new_word} {vacancies_word(count)}"
 
 
 def notifications_saved(selected: list[str]) -> str:
