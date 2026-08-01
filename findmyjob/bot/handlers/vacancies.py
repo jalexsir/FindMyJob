@@ -41,6 +41,11 @@ PROGRESS_POLL_SECONDS = 0.2
 # триває після завантаження, тож майже нічого не додає до загального часу.
 STATUS_STEP_SECONDS = 0.4
 
+# Пауза після "Видалено N дублікатів", перш ніж надсилати зведення. Без неї
+# редагування цього повідомлення й наступне зведення прилітають практично
+# одночасно — людина не встигає прочитати, скільки саме дублікатів прибрали.
+DEDUP_DONE_PAUSE_SECONDS = 1.5
+
 
 @dataclass(frozen=True)
 class VacancySelection:
@@ -324,6 +329,7 @@ class VacancyHandlers(HandlerGroup):
         if dedup_status is not None:
             total_duplicates = sum(source.duplicates for source in sources)
             await dedup_status(texts.dedup_done(total_duplicates))
+            await asyncio.sleep(DEDUP_DONE_PAUSE_SECONDS)
 
         return sources
 
