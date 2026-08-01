@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from urllib.parse import quote
 
@@ -141,6 +142,18 @@ def _pagination_row(
     return row
 
 
+# Розділювач між посадою і додатковим уточненням у заголовку, напр.
+# "Technical Support Engineer — RnD". Лише варіанти з пробілами з обох боків
+# (" — ", " - ") — щоб не різати дефіс усередині самої назви ("C-level").
+_TITLE_SUFFIX_RE = re.compile(r"\s[—–−|]\s|\s-\s")
+
+
+def _search_title(title: str) -> str:
+    """Ліва частина посади до розділового знака — саме вона йде в пошук."""
+    match = _TITLE_SUFFIX_RE.search(title)
+    return title[:match.start()].strip() if match else title.strip()
+
+
 def _djinni_search_url(vacancy: Vacancy) -> str:
     """Google-пошук цієї ж вакансії на Djinni за назвою й компанією.
 
@@ -148,7 +161,7 @@ def _djinni_search_url(vacancy: Vacancy) -> str:
     зручно, як хотілось би, тож для вакансій із DOU даємо швидкий шлях
     перевірити, чи є той самий запис на Djinni.
     """
-    query = f'site:djinni.co inurl:jobs "{vacancy.title}" {vacancy.company}'
+    query = f'site:djinni.co inurl:jobs "{_search_title(vacancy.title)}" {vacancy.company}'
     return f"https://www.google.com/search?q={quote(query)}"
 
 
