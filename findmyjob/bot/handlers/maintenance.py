@@ -10,7 +10,9 @@ from telegram.ext import BaseHandler, CallbackQueryHandler, ContextTypes
 
 from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
-from findmyjob.bot.keyboards import build_category_keyboard
+from findmyjob.bot.keyboards import (
+    build_category_keyboard, build_clear_confirm_keyboard, build_reselect_keyboard,
+)
 
 from .base import HandlerGroup
 
@@ -21,13 +23,40 @@ class MaintenanceHandlers(HandlerGroup):
     def handlers(self) -> Sequence[BaseHandler]:
         return (
             CallbackQueryHandler(self.clear_history, pattern=cb.exact(cb.CB_CLEAR)),
+            CallbackQueryHandler(self.confirm_clear, pattern=cb.exact(cb.CB_CLEAR_YES)),
+            CallbackQueryHandler(self.cancel_clear, pattern=cb.exact(cb.CB_CLEAR_NO)),
         )
 
     async def clear_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
+        await query.answer()
+        await self.send_clear_prompt(update, context, chat_id=query.message.chat_id)
+
+    async def send_clear_prompt(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, *, chat_id: int
+    ) -> None:
+        """Питає підтвердження, перш ніж стирати все листування."""
+        message = await context.bot.send_message(
+            chat_id=chat_id,
+            text=texts.MSG_CLEAR_CONFIRM,
+            reply_markup=build_clear_confirm_keyboard(),
+        )
+        self.session(update, context).track(message.message_id)
+
+    async def confirm_clear(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """«Так»: власне очищення — межа діапазону це саме повідомлення підтвердження."""
+        query = update.callback_query
         await query.answer(texts.MSG_CLEARING)
         await self.clear_chat(
             update, context, chat_id=query.message.chat_id, last_message_id=query.message.message_id
+        )
+
+    async def cancel_clear(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """«Ні»: листування ціле, пропонуємо переобрати категорії пошуку."""
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text(
+            texts.MSG_RESELECT_PROMPT, reply_markup=build_reselect_keyboard()
         )
 
     async def clear_chat(

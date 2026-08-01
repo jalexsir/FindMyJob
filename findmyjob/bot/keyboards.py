@@ -120,6 +120,14 @@ def build_notify_off_confirm_keyboard() -> InlineKeyboardMarkup:
     ]])
 
 
+def build_clear_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Так/Ні на питання про очищення листування."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_CLEAR_NO),
+        InlineKeyboardButton(texts.BTN_YES, callback_data=cb.CB_CLEAR_YES),
+    ]])
+
+
 def build_clear_hidden_confirm_keyboard() -> InlineKeyboardMarkup:
     """Так/Ні на питання про очищення списку вилучених."""
     return InlineKeyboardMarkup([[
