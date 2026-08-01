@@ -11,7 +11,7 @@ from telegram.ext import BaseHandler, CallbackQueryHandler, ContextTypes
 from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
 from findmyjob.bot.keyboards import (
-    build_category_keyboard, build_clear_confirm_keyboard, build_reselect_keyboard,
+    build_clear_confirm_keyboard, build_intro_continue_keyboard, build_reselect_keyboard,
 )
 
 from .base import HandlerGroup
@@ -102,13 +102,11 @@ class MaintenanceHandlers(HandlerGroup):
         )
         session.track(intro.message_id)
 
-        message = await context.bot.send_message(
-            chat_id=chat_id,
-            text=texts.categories_status([]),
-            parse_mode=ParseMode.HTML,
-            reply_markup=build_category_keyboard([]),
+        footer = await context.bot.send_message(
+            chat_id=chat_id, text=texts.MSG_INTRO_FOOTER,
+            reply_markup=build_intro_continue_keyboard(),
         )
-        session.track(message.message_id)
+        session.track(footer.message_id)
 
     async def track_user_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Запам'ятовує будь-яке повідомлення користувача — щоб потім видалити."""

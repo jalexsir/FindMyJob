@@ -241,6 +241,13 @@ def build_show_hidden_prompt_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def build_intro_continue_keyboard() -> InlineKeyboardMarkup:
+    """Єдина кнопка «Продовжити» під інтро — веде до вибору категорій."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_CONTINUE, callback_data=cb.CB_INTRO_CONTINUE)],
+    ])
+
+
 def build_reselect_keyboard() -> InlineKeyboardMarkup:
     """Єдина кнопка «Переобрати категорії пошуку»."""
     return InlineKeyboardMarkup([

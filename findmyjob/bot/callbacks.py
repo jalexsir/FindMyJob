@@ -26,6 +26,7 @@ CB_FAVS_NO = "favs_no"
 CB_CAT_CONFIRM = "cat_confirm"
 CB_NOOP = "noop"                              # кнопка-індикатор сторінки
 CB_RESELECT_CATS = "reselect_cats"
+CB_INTRO_CONTINUE = "intro_continue"
 CB_NOTIFY_SETUP = "notify_setup"              # почати вибір категорій сповіщень
 CB_NOTIFY_CONFIRM = "notify_confirm"          # "Додати нотифікацію"
 CB_NOTIFY_OFF = "notify_off"                  # запит підтвердження

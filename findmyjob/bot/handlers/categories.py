@@ -11,7 +11,8 @@ from telegram.ext import BaseHandler, CallbackQueryHandler, CommandHandler, Cont
 from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
 from findmyjob.bot.keyboards import (
-    MAX_SELECTED_CATEGORIES, build_category_keyboard, build_persistent_keyboard,
+    MAX_SELECTED_CATEGORIES, build_category_keyboard, build_intro_continue_keyboard,
+    build_persistent_keyboard,
 )
 
 from .base import HandlerGroup
@@ -28,6 +29,7 @@ class CategoryHandlers(HandlerGroup):
             CallbackQueryHandler(self.change_page, pattern=cb.prefixed(cb.CB_CAT_PAGE)),
             CallbackQueryHandler(self.noop, pattern=cb.exact(cb.CB_NOOP)),
             CallbackQueryHandler(self.reselect, pattern=cb.exact(cb.CB_RESELECT_CATS)),
+            CallbackQueryHandler(self.continue_intro, pattern=cb.exact(cb.CB_INTRO_CONTINUE)),
         )
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -39,12 +41,16 @@ class CategoryHandlers(HandlerGroup):
         intro = await update.message.reply_text(texts.MSG_INTRO, parse_mode=ParseMode.HTML)
         session.track(intro.message_id)
 
-        message = await update.message.reply_text(
-            texts.categories_status([]),
-            parse_mode=ParseMode.HTML,
-            reply_markup=build_category_keyboard([]),
+        footer = await update.message.reply_text(
+            texts.MSG_INTRO_FOOTER, reply_markup=build_intro_continue_keyboard()
         )
-        session.track(message.message_id)
+        session.track(footer.message_id)
+
+    async def continue_intro(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Кнопка «Продовжити» під інтро — показує вибір категорій."""
+        query = update.callback_query
+        await query.answer()
+        await self._render_selection(query, self.user_state(update, context).categories, 0)
 
     async def toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
