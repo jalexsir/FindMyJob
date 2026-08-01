@@ -49,8 +49,8 @@ class MenuHandlers(HandlerGroup):
             texts.BTN_NOTIFICATIONS: lambda u, c: notifications.send_prompt(
                 u.message.chat, u, c
             ),
-            texts.BTN_CLEAR: lambda u, c: maintenance.clear_chat(
-                u, c, chat_id=u.message.chat_id, last_message_id=u.message.message_id
+            texts.BTN_CLEAR: lambda u, c: maintenance.send_clear_prompt(
+                u, c, chat_id=u.message.chat_id
             ),
             texts.BTN_CLEAR_HIDE: lambda u, c: hidden.clear_all(u.message.chat, u, c),
         }
