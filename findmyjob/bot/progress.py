@@ -83,6 +83,11 @@ class SourceProgress:
     def total_sources(self) -> int:
         return len(self._states)
 
+    @property
+    def is_complete(self) -> bool:
+        """Усі джерела відзвітували (успішно чи ні) — фетч більше не триває."""
+        return all(not state.pending for state in self._states.values())
+
     def status_line(self) -> str:
         """Рядок виду `Djinni I ⏳ : Djinni II ✅ : DOU I 🔄 : DOU II ❌`."""
         return SEPARATOR.join(

@@ -9,7 +9,7 @@ from email.utils import parsedate_to_datetime
 
 from findmyjob.models import MergedSource, Vacancy
 
-from .texts import duplicates_word, period_phrase, vacancies_word
+from .texts import period_phrase, vacancies_word
 
 SALARY_UNSPECIFIED = "не вказано"
 
@@ -88,17 +88,6 @@ def build_summary(sources: list[MergedSource], days: int | None, hidden_count: i
 
     lines = [f"🗂 <b>{header}:</b>\n"]
     for source in sources:
-        lines.append(f"  • {source.name} — {_source_line(source, hidden_count)}")
+        count = len(source.vacancies)
+        lines.append(f"  • {source.name} — {count} {vacancies_word(count)}")
     return "\n".join(lines)
-
-
-def _source_line(source: MergedSource, hidden_count: int) -> str:
-    count = len(source.vacancies)
-    text = f"{count} {vacancies_word(count)}"
-
-    # Коли є вилучені — дублікати не показуємо, щоб не перевантажувати зведення.
-    # Дублікати рахуються ще ДО фільтру по даті: якщо після фільтру нічого не
-    # лишилось, показувати їх тут нерелевантно.
-    if hidden_count or not source.duplicates or not count:
-        return text
-    return f"{text} (видалено {source.duplicates} {duplicates_word(source.duplicates)})"
