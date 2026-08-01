@@ -14,8 +14,8 @@ from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
 from findmyjob.bot.formatting import format_vacancy
 from findmyjob.bot.keyboards import (
-    build_restore_keyboard, build_show_hidden_prompt_keyboard, build_unhide_keyboard,
-    build_vacancy_keyboard,
+    build_clear_hidden_confirm_keyboard, build_reselect_keyboard, build_restore_keyboard,
+    build_show_hidden_prompt_keyboard, build_unhide_keyboard, build_vacancy_keyboard,
 )
 from findmyjob.bot.sending import pace
 from findmyjob.bot.state import StateRepository, UserState
@@ -44,6 +44,8 @@ class HiddenHandlers(HandlerGroup):
             CallbackQueryHandler(self.show_list, pattern=cb.exact(cb.CB_SHOW_HIDDEN)),
             CallbackQueryHandler(self.show_prompt, pattern=cb.exact(cb.CB_SHOW_HIDDEN_PROMPT)),
             CallbackQueryHandler(self.clear, pattern=cb.exact(cb.CB_CLEAR_HIDE)),
+            CallbackQueryHandler(self.confirm_clear, pattern=cb.exact(cb.CB_CLEAR_HIDE_YES)),
+            CallbackQueryHandler(self.cancel_clear, pattern=cb.exact(cb.CB_CLEAR_HIDE_NO)),
             CallbackQueryHandler(self.hide, pattern=cb.prefixed(cb.CB_HIDE)),
             CallbackQueryHandler(self.unhide, pattern=cb.prefixed(cb.CB_UNHIDE)),
             CallbackQueryHandler(self.restore, pattern=cb.prefixed(cb.CB_RESTORE)),
@@ -196,16 +198,38 @@ class HiddenHandlers(HandlerGroup):
         await self.clear_all(query.message.chat, update, context)
 
     async def clear_all(self, chat, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Крок 1: кількість вилучених + питання Так/Ні, без самого видалення."""
+        count = len(self.user_state(update, context).hidden)
+        if not count:
+            message = await chat.send_message(texts.MSG_HIDDEN_ALREADY_EMPTY)
+            self.session(update, context).track(message.message_id)
+            return
+
+        message = await chat.send_message(
+            f"🙈 <b>У списку вилучених — {count} {texts.vacancies_word(count)}.</b>"
+            "\n\n❓ Очистити список?",
+            parse_mode=ParseMode.HTML,
+            reply_markup=build_clear_hidden_confirm_keyboard(),
+        )
+        self.session(update, context).track(message.message_id)
+
+    async def confirm_clear(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Крок 2 «Так»: власне очищення — текст той самий, що й раніше."""
+        query = update.callback_query
+        await query.answer()
+
         state = self.user_state(update, context)
         count = len(state.hidden)
-        if count:
-            state.save_hidden({})
-            text = f"✅ Список вилучених вакансій очищений ({count})"
-        else:
-            text = texts.MSG_HIDDEN_ALREADY_EMPTY
+        state.save_hidden({})
+        await query.edit_message_text(f"✅ Список вилучених вакансій очищений ({count})")
 
-        message = await chat.send_message(text)
-        self.session(update, context).track(message.message_id)
+    async def cancel_clear(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Крок 2 «Ні»: список цілий, пропонуємо переобрати категорії пошуку."""
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text(
+            texts.MSG_RESELECT_PROMPT, reply_markup=build_reselect_keyboard()
+        )
 
     # ── Допоміжне ────────────────────────────────────────────────────────────
 
