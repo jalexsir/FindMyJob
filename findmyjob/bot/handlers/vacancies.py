@@ -97,6 +97,7 @@ class VacancyHandlers(HandlerGroup):
             update, context, days,
             report=self._reporter(session, message.reply_text),
             status=self._status_updater(session, message.reply_text),
+            dedup_status=self._status_updater(session, message.reply_text),
         )
 
         text, keyboard = self._summary_message(selection, days)
@@ -199,11 +200,12 @@ class VacancyHandlers(HandlerGroup):
         days: int | None,
         report: Reporter | None = None,
         status: Reporter | None = None,
+        dedup_status: Reporter | None = None,
     ) -> VacancySelection:
         """Фетчить вакансії, прибирає вилучені, впорядковує та кладе в сесію."""
         state = self.user_state(update, context)
         categories = state.categories or None
-        sources = await self._fetch(categories, days, report, status)
+        sources = await self._fetch(categories, days, report, status, dedup_status)
 
         hidden_count = self._remove_hidden(sources, state)
         vacancies = sorted(
@@ -258,6 +260,7 @@ class VacancyHandlers(HandlerGroup):
         days: int | None,
         report: Reporter | None,
         status: Reporter | None = None,
+        dedup_status: Reporter | None = None,
     ):
         """Фетч у робочому потоці; поки він іде — транслюємо його події в чат.
 
@@ -288,6 +291,19 @@ class VacancyHandlers(HandlerGroup):
             await status(line)
             await asyncio.sleep(STATUS_STEP_SECONDS)
 
+        # Джерела всі відзвітували, але дедуплікація (Етап 2) ще йде у фоновому
+        # потоці — task стає done() лише після неї. Повідомляємо про це один
+        # раз, з тією ж паузою, що й переходи рядка стану.
+        dedup_announced = False
+
+        async def announce_dedup() -> None:
+            nonlocal dedup_announced
+            if dedup_announced or dedup_status is None or not progress.is_complete:
+                return
+            dedup_announced = True
+            await asyncio.sleep(STATUS_STEP_SECONDS)
+            await dedup_status(texts.MSG_DEDUP_IN_PROGRESS)
+
         while not task.done() or not events.empty():
             for line in progress.slow_reports():
                 await report(line)
@@ -299,9 +315,17 @@ class VacancyHandlers(HandlerGroup):
             for line in progress.consume(event):
                 await report(line)
             await refresh()
+            await announce_dedup()
 
         await refresh()
-        return await task
+        await announce_dedup()
+        sources = await task
+
+        if dedup_status is not None:
+            total_duplicates = sum(source.duplicates for source in sources)
+            await dedup_status(texts.dedup_done(total_duplicates))
+
+        return sources
 
     def _reporter(self, session, reply) -> Reporter:
         """Надсилає рядок звіту окремим повідомленням і бере його на облік."""

@@ -53,6 +53,7 @@ MSG_INTRO = (
     "після перезапуску."
 )
 MSG_LOADING = "⏳ Завантажую вакансії, зачекай..."
+MSG_DEDUP_IN_PROGRESS = "🔀 Видалення дублікатів…"
 MSG_FETCHING = "⏳ Запрошую інформацію..."
 MSG_PICK_PERIOD = "Обери період доступних вакансій в меню"
 MSG_PICK_CATEGORIES = "Оберіть одну або декілька категорій вакансій 👇"
@@ -125,6 +126,10 @@ def vacancies_word(n: int) -> str:
 
 def duplicates_word(n: int) -> str:
     return pluralize_ua(n, "дублікат", "дублікати", "дублікатів")
+
+
+def dedup_done(count: int) -> str:
+    return f"🔀 Видалено {count} {duplicates_word(count)}"
 
 
 def favorite_vacancies_phrase(n: int) -> str:
