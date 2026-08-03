@@ -89,12 +89,24 @@ CREATE TABLE IF NOT EXISTS nda_baseline (
 );
 """
 
+# Окремий знімок для сповіщень NDA-All — теж один спільний на всіх, але, на
+# відміну від nda_baseline, оновлюється АВТОМАТИЧНО щоразу, коли відпрацьовує
+# шкедулер (3 рази на день): це те, з чим звіряють свіжий фетч, щоб визначити
+# різницю для розсилки, а потім цілком перезаписують щойно завантаженим.
+_NDA_NOTIFICATION_BASELINE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS nda_notification_baseline (
+    link  TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT ''
+);
+"""
+
 _TABLE_HIDDEN = "hidden"
 _TABLE_FAVORITES = "favorites"
 _TABLE_CHAT_STATE = "chat_state"
 _TABLE_NOTIFICATION_SUBS = "notification_subs"
 _TABLE_NOTIFICATION_SENT = "notification_sent"
 _TABLE_NDA_BASELINE = "nda_baseline"
+_TABLE_NDA_NOTIFICATION_BASELINE = "nda_notification_baseline"
 
 
 @dataclass(frozen=True)
@@ -145,6 +157,7 @@ class VacancyStore:
             conn.execute(_NOTIFICATION_SUBS_SCHEMA)
             conn.execute(_NOTIFICATION_SENT_SCHEMA)
             conn.execute(_NDA_BASELINE_SCHEMA)
+            conn.execute(_NDA_NOTIFICATION_BASELINE_SCHEMA)
 
     # ── Списки вакансій ──────────────────────────────────────────────────────
 
@@ -275,6 +288,28 @@ class VacancyStore:
         """Лише посилання — саме за ними звіряють "Показати нові"."""
         with self._connect() as conn:
             rows = conn.execute(f"SELECT link FROM {_TABLE_NDA_BASELINE}").fetchall()
+        return {row[0] for row in rows}
+
+    # ── Знімок для сповіщень NDA-All (окремий від еталону вище) ──────────────
+
+    def save_nda_notification_baseline(self, entries: Iterable[tuple[str, str]]) -> None:
+        """Перезаписує знімок цілком — викликається щоразу після проходу
+        шкедулера, незалежно від того, чи знайшлась різниця."""
+        rows = list(entries)
+        with self._connect() as conn:
+            conn.execute(f"DELETE FROM {_TABLE_NDA_NOTIFICATION_BASELINE}")
+            if rows:
+                conn.executemany(
+                    f"INSERT INTO {_TABLE_NDA_NOTIFICATION_BASELINE} (link, title) "
+                    f"VALUES (?, ?)",
+                    rows,
+                )
+
+    def load_nda_notification_baseline_links(self) -> set[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT link FROM {_TABLE_NDA_NOTIFICATION_BASELINE}"
+            ).fetchall()
         return {row[0] for row in rows}
 
     # ── Внутрішні деталі ─────────────────────────────────────────────────────

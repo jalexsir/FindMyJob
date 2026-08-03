@@ -12,6 +12,7 @@ from findmyjob.bot.handlers import (
     MaintenanceHandlers, MenuHandlers, NdaActionHandlers, NotificationHandlers,
     VacancyHandlers,
 )
+from findmyjob.bot.nda_notifier import NdaNotificationDispatcher
 from findmyjob.bot.notifier import NotificationDispatcher
 from findmyjob.bot.sending import VacancySender
 from findmyjob.bot.state import (
@@ -28,6 +29,10 @@ logger = logging.getLogger(__name__)
 NOTIFICATIONS_TIMEZONE = "Europe/Kyiv"
 NOTIFICATIONS_FROM_HOUR = 8
 NOTIFICATIONS_TO_HOUR = 20
+
+# Сповіщення NDA-All: окремий шкедулер, лише тричі на день — не щогодини, бо
+# дедуп тут не персональний, а через один спільний знімок (nda_notifier.py).
+NDA_NOTIFICATIONS_HOURS = "10,14,20"
 
 
 class BotApplication:
@@ -54,6 +59,7 @@ class BotApplication:
         maintenance = MaintenanceHandlers(self._states)
         nda_actions = NdaActionHandlers(self._states, sender, settings.admin_user_id)
         self._notifier = NotificationDispatcher(self._states, feeds, sender)
+        self._nda_notifier = NdaNotificationDispatcher(self._states, sender)
 
         # Порядок груп = порядок реєстрації обробників. Патерни callback_data не
         # перетинаються, а от текстові обробники меню мають бути останніми.
@@ -114,9 +120,18 @@ class BotApplication:
             job_kwargs={"trigger": "cron", "hour": 3, "minute": 0, "timezone": timezone},
             name="notifications-purge",
         )
+        job_queue.run_custom(
+            self._nda_notifier.run,
+            job_kwargs={
+                "trigger": "cron", "hour": NDA_NOTIFICATIONS_HOURS, "minute": 0,
+                "timezone": timezone,
+            },
+            name="nda-notifications",
+        )
         logger.info(
-            "Сповіщення заплановано: щогодини %d:00–%d:00 (%s)",
-            NOTIFICATIONS_FROM_HOUR, NOTIFICATIONS_TO_HOUR, NOTIFICATIONS_TIMEZONE,
+            "Сповіщення заплановано: щогодини %d:00–%d:00, NDA-All — %s (%s)",
+            NOTIFICATIONS_FROM_HOUR, NOTIFICATIONS_TO_HOUR, NDA_NOTIFICATIONS_HOURS,
+            NOTIFICATIONS_TIMEZONE,
         )
 
     def run(self) -> None:

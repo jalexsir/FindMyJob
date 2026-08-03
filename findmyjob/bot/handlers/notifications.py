@@ -18,8 +18,8 @@ from telegram.ext import BaseHandler, CallbackQueryHandler, ContextTypes
 from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
 from findmyjob.bot.keyboards import (
-    MAX_SELECTED_CATEGORIES, NOTIFY_FLOW, NdaToggleBlocked, build_category_keyboard,
-    build_notifications_keyboard, build_notify_off_confirm_keyboard, resolve_nda_toggle,
+    MAX_SELECTED_CATEGORIES, NOTIFY_FLOW, build_category_keyboard,
+    build_notifications_keyboard, build_notify_off_confirm_keyboard,
 )
 
 from .base import HandlerGroup
@@ -68,20 +68,15 @@ class NotificationHandlers(HandlerGroup):
         await self._render(query, session.notify_draft, 0)
 
     async def toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """NDA-All тут — звичайна категорія в межах тієї ж квоти в 5, без
+        винятків: на відміну від пошуку, сповіщення про неї можна поєднувати з
+        рештою (окремий шкедулер сам зводить її дифф незалежно від інших)."""
         query = update.callback_query
         session = self.session(update, context)
         category = cb.argument(query.data, cb.CB_NOTIFY_TOGGLE)
         draft = session.notify_draft
 
-        try:
-            override = resolve_nda_toggle(draft, category)
-        except NdaToggleBlocked:
-            await query.answer(texts.MSG_NDA_EXCLUSIVE, show_alert=True)
-            return
-
-        if override is not None:
-            draft = override
-        elif category in draft:
+        if category in draft:
             draft.remove(category)
         elif len(draft) >= MAX_SELECTED_CATEGORIES:
             await query.answer(

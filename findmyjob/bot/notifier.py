@@ -25,6 +25,7 @@ from findmyjob.bot.keyboards import build_notification_footer_keyboard
 from findmyjob.bot.sending import VacancySender
 from findmyjob.bot.state import StateRepository
 from findmyjob.feeds import VacancyFeedService
+from findmyjob.feeds.nda import NDA_CATEGORY
 from findmyjob.models import Vacancy
 from findmyjob.storage import NotificationSub
 
@@ -77,7 +78,21 @@ class NotificationDispatcher:
             logger.info("[СПОВІЩЕННЯ] підписників немає — фіди не чіпаємо")
             return
 
-        categories = sorted({c for sub in subscriptions.values() for c in sub.categories})
+        # NDA-All обслуговує окремий шкедулер (nda_notifier.py, 10:00/14:00/
+        # 20:00, дифф проти спільного знімку) — тут її пропускаємо, інакше
+        # підписник отримав би сповіщення про неї двічі.
+        categories = sorted({
+            c for sub in subscriptions.values() for c in sub.categories if c != NDA_CATEGORY
+        })
+        if not categories:
+            # Порожній список тут — це "нема звичайних категорій", а не "нема
+            # фільтру": `VacancyFeedService.fetch([])` через `or` впав би на
+            # AVAILABLE_CATEGORIES й потягнув би все. Пропускаємо явно.
+            logger.info(
+                "[СПОВІЩЕННЯ] підписники є, але лише на NDA-All — RSS не чіпаємо"
+            )
+            return
+
         logger.info(
             "[СПОВІЩЕННЯ] старт: %d підписник(ів), %d категорій: %s",
             len(subscriptions), len(categories), ", ".join(categories),

@@ -22,9 +22,11 @@ CATEGORIES_PER_ROW = 2
 # Більше — забагато RSS-запитів і занадто широке зведення
 MAX_SELECTED_CATEGORIES = 5
 
-# NDA-All — лише в пошуку: у сповіщеннях весь конвеєр побудований навколо дати
-# публікації й персонального SQLite-журналу, а в NDA дати публікації нема
-# взагалі, і список свідомо спільний, а не персональний.
+# NDA-All в обох сценаріях — в кінці списку. У пошуку вона взаємовиключна з
+# рештою (окремий конвеєр без RSS/дати публікації, спільний список — див.
+# resolve_nda_toggle). У сповіщеннях — звичайна категорія в тій самій квоті:
+# власний шкедулер (10:00/14:00/20:00) сам зводить її дифф проти спільного
+# знімку незалежно від інших категорій користувача, тож поєднувати можна.
 DISPLAY_CATEGORIES = AVAILABLE_CATEGORIES + [NDA_CATEGORY]
 
 
@@ -42,6 +44,9 @@ class CategoryFlow:
     confirm: str
     confirm_label: str
     categories: list[str]
+    # Позначка 🔒 біля NDA-All має сенс лише там, де вона й справді
+    # взаємовиключна (пошук) — у сповіщеннях це звичайна категорія.
+    nda_locked_badge: bool = True
 
 
 SEARCH_FLOW = CategoryFlow(
@@ -56,7 +61,8 @@ NOTIFY_FLOW = CategoryFlow(
     page=cb.CB_NOTIFY_PAGE,
     confirm=cb.CB_NOTIFY_CONFIRM,
     confirm_label="🔔 Додати нотифікацію",
-    categories=AVAILABLE_CATEGORIES,
+    categories=DISPLAY_CATEGORIES,
+    nda_locked_badge=False,
 )
 
 
@@ -129,7 +135,7 @@ def build_category_keyboard(
     rows = [
         [
             InlineKeyboardButton(
-                _category_label(category, selected),
+                _category_label(category, selected, flow.nda_locked_badge),
                 callback_data=cb.payload(flow.toggle, category),
             )
             for category in page_categories[i:i + CATEGORIES_PER_ROW]
@@ -148,9 +154,9 @@ def build_category_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def _category_label(category: str, selected: list[str]) -> str:
+def _category_label(category: str, selected: list[str], show_lock: bool) -> str:
     mark = "✅" if category in selected else "⬜"
-    suffix = " 🔒" if category == NDA_CATEGORY else ""
+    suffix = " 🔒" if category == NDA_CATEGORY and show_lock else ""
     return f"{mark} {category}{suffix}"
 
 
