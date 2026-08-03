@@ -9,7 +9,8 @@ from telegram.ext import Application
 
 from findmyjob.bot.handlers import (
     CategoryHandlers, FavoriteHandlers, HandlerGroup, HiddenHandlers,
-    MaintenanceHandlers, MenuHandlers, NotificationHandlers, VacancyHandlers,
+    MaintenanceHandlers, MenuHandlers, NdaActionHandlers, NotificationHandlers,
+    VacancyHandlers,
 )
 from findmyjob.bot.notifier import NotificationDispatcher
 from findmyjob.bot.sending import VacancySender
@@ -51,19 +52,22 @@ class BotApplication:
         favorites = FavoriteHandlers(self._states, feeds, sender)
         notifications = NotificationHandlers(self._states)
         maintenance = MaintenanceHandlers(self._states)
+        nda_actions = NdaActionHandlers(self._states, sender, settings.admin_user_id)
         self._notifier = NotificationDispatcher(self._states, feeds, sender)
 
         # Порядок груп = порядок реєстрації обробників. Патерни callback_data не
         # перетинаються, а от текстові обробники меню мають бути останніми.
         self._groups: tuple[HandlerGroup, ...] = (
-            CategoryHandlers(self._states),
+            CategoryHandlers(self._states, settings.admin_user_id),
             vacancies,
             hidden,
             favorites,
             notifications,
+            nda_actions,
             maintenance,
             MenuHandlers(
-                self._states, vacancies, hidden, favorites, notifications, maintenance
+                self._states, vacancies, hidden, favorites, notifications, maintenance,
+                nda_actions,
             ),
         )
 

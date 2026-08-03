@@ -32,6 +32,10 @@ class Settings:
     # Скільки вакансій одного джерела максимум показуємо за раз
     max_vacancies_per_source: int = 100
 
+    # Telegram user_id власника бота — лише йому показується кнопка
+    # "Оновити еталон" для NDA-All. None, якщо не задано (кнопка не показується).
+    admin_user_id: int | None = None
+
     @classmethod
     def from_env(cls) -> "Settings":
         """Читає .env та змінні оточення."""
@@ -39,4 +43,8 @@ class Settings:
         token = (os.getenv("BOT_TOKEN") or "").strip()
         if not token:
             raise RuntimeError("BOT_TOKEN не знайдено. Створи .env з BOT_TOKEN=...")
-        return cls(bot_token=token)
+
+        admin_raw = (os.getenv("ADMIN_USER_ID") or "").strip()
+        admin_user_id = int(admin_raw) if admin_raw.isdigit() else None
+
+        return cls(bot_token=token, admin_user_id=admin_user_id)

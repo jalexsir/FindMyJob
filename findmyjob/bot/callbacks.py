@@ -32,6 +32,12 @@ CB_NOTIFY_CONFIRM = "notify_confirm"          # "Додати нотифікац
 CB_NOTIFY_OFF = "notify_off"                  # запит підтвердження
 CB_NOTIFY_OFF_YES = "notify_off_yes"
 CB_NOTIFY_OFF_NO = "notify_off_no"
+CB_NDA_SHOW_NEW_YES = "nda_new_yes"
+CB_NDA_SHOW_NEW_NO = "nda_new_no"
+CB_NDA_SHOW_ALL_YES = "nda_all_yes"
+CB_NDA_SHOW_ALL_NO = "nda_all_no"
+CB_NDA_BASELINE_YES = "nda_baseline_yes"
+CB_NDA_BASELINE_NO = "nda_baseline_no"
 
 # Дії з параметром — префікси, до яких дописується значення
 CB_CONFIRM_YES = "confirm_yes:"

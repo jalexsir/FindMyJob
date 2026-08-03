@@ -141,3 +141,14 @@ def get_nda_source() -> MergedSource:
         vacancies = _fetch_nda_vacancies()
         _cache.put(vacancies)
     return MergedSource(name=NDA_CATEGORY, vacancies=vacancies, duplicates=0)
+
+
+def refresh_nda_source() -> MergedSource:
+    """Примусово фетчить свіжий список, ігноруючи TTL-кеш, і одразу оновлює його.
+
+    Використовується лише явним оновленням еталону ("Оновити еталон") — там
+    потрібен саме поточний стан сайту, а не те, що лежить у кеші до 120 с.
+    """
+    vacancies = _fetch_nda_vacancies()
+    _cache.put(vacancies)
+    return MergedSource(name=NDA_CATEGORY, vacancies=vacancies, duplicates=0)

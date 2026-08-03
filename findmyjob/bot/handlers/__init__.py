@@ -6,6 +6,7 @@ from .favorites import FavoriteHandlers
 from .hidden import HiddenHandlers
 from .maintenance import MaintenanceHandlers
 from .menu import MenuHandlers
+from .nda import NdaActionHandlers
 from .notifications import NotificationHandlers
 from .vacancies import VacancyHandlers
 
@@ -16,6 +17,7 @@ __all__ = [
     "HiddenHandlers",
     "MaintenanceHandlers",
     "MenuHandlers",
+    "NdaActionHandlers",
     "NotificationHandlers",
     "VacancyHandlers",
 ]

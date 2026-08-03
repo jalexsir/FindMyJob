@@ -11,10 +11,14 @@ BTN_FAVORITES = "⭐ Обране"
 BTN_NOTIFICATIONS = "🔔 Сповіщення"
 BTN_CLEAR = "🗑 Очистити листування"
 BTN_CLEAR_HIDE = "🗑 Очистити список вилучених"
+BTN_NDA_SHOW_NEW = "🆕 Показати нові"
+BTN_NDA_SHOW_ALL = "📋 Показати всі"
+BTN_NDA_UPDATE_BASELINE = "🔄 Оновити еталон"
 
 ALL_BUTTON_TEXTS = (
     BTN_VAC_1D, BTN_VAC_7D, BTN_VAC_ALL,
     BTN_SHOW_HIDDEN, BTN_FAVORITES, BTN_NOTIFICATIONS, BTN_CLEAR, BTN_CLEAR_HIDE,
+    BTN_NDA_SHOW_NEW, BTN_NDA_SHOW_ALL, BTN_NDA_UPDATE_BASELINE,
 )
 
 # ── Підписи інлайн-кнопок ─────────────────────────────────────────────────────
@@ -58,6 +62,7 @@ MSG_LOADING = "⏳ Завантажую вакансії, зачекай..."
 MSG_DEDUP_IN_PROGRESS = "🔀 Видалення дублікатів…"
 MSG_FETCHING = "⏳ Запрошую інформацію..."
 MSG_PICK_PERIOD = "Обери період доступних вакансій в меню"
+MSG_PICK_NDA_ACTION = "Обери дію в меню 👇"
 MSG_PICK_CATEGORIES = "Оберіть одну або декілька категорій вакансій 👇"
 MSG_PICK_AT_LEAST_ONE = "Оберіть хоча б одну категорію!"
 MSG_NO_CATEGORY_SELECTED = "⚠️ Категорія не обрана, оберіть будь ласка зі списку 👇"
@@ -86,6 +91,8 @@ MSG_NOTIFY_OFF_CANCELLED = (
     "Обрати категорії можна кнопками нижче 👇"
 )
 MSG_NDA_EXCLUSIVE = "🔒 NDA-All — окрема категорія, її не можна поєднувати з іншими"
+MSG_NDA_UPDATE_BASELINE_CONFIRM = "⚠️ Оновити еталонний список поточним станом NDA-All?"
+MSG_NDA_BASELINE_CANCELLED = "👌 Еталонний список не змінено."
 MSG_HIDDEN_EMPTY = "📭 Список вилучених вакансій порожній."
 MSG_HIDDEN_ALREADY_EMPTY = "📭 Список пустий"
 MSG_FAVORITES_EMPTY = "⭐ Список обраних вакансій порожній."
@@ -189,3 +196,21 @@ def notifications_saved(selected: list[str]) -> str:
         f"✅ Сповіщення увімкнено для категорій: <b>{', '.join(selected)}</b>\n\n"
         "Щогодини з 8:00 до 20:00 надсилатиму нові вакансії за сьогодні."
     )
+
+
+def nda_new_summary(count: int) -> str:
+    """Підсумок діффу проти еталонного списку ("Показати нові")."""
+    if not count:
+        return "🆕 Нових вакансій (яких немає в еталонному списку) не знайдено."
+    return f"🆕 Знайдено {count} {vacancies_word(count)}, яких немає в еталонному списку."
+
+
+def nda_all_summary(count: int) -> str:
+    """Підсумок повного поточного списку NDA-All ("Показати всі")."""
+    if not count:
+        return "📋 NDA-All зараз порожній — вакансій не знайдено."
+    return f"📋 Усього в NDA-All зараз {count} {vacancies_word(count)}."
+
+
+def nda_baseline_updated(count: int) -> str:
+    return f"✅ Еталонний список оновлено: {count} {vacancies_word(count)}."
