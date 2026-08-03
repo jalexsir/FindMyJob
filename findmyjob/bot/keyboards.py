@@ -10,7 +10,7 @@ from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup,
 )
 
-from findmyjob.feeds import AVAILABLE_CATEGORIES, NDA_CATEGORY, Site
+from findmyjob.feeds import AVAILABLE_CATEGORIES, NDA_CATEGORY, NDA_SOURCE_NAME, Site
 from findmyjob.models import Vacancy
 
 from . import callbacks as cb
@@ -231,6 +231,14 @@ def build_vacancy_keyboard(vacancy: Vacancy, is_favorite: bool = False) -> Inlin
             cb.CB_UNFAVORITE if is_favorite else cb.CB_FAVORITE, short_link
         ),
     )
+    if vacancy.source == NDA_SOURCE_NAME:
+        # NDA-All — один спільний еталонний список, не персональна вибірка за
+        # категоріями: "Не показувати" тут ховати нема від чого (переобрати
+        # категорії, щоб вакансія зникла, не можна — вона єдина для всіх),
+        # тож лишаємо тільки Обране й Відкрити в одному рядку.
+        return InlineKeyboardMarkup([
+            [favorite_button, InlineKeyboardButton(texts.BTN_OPEN_VACANCY, url=vacancy.link)],
+        ])
     return InlineKeyboardMarkup([
         _open_vacancy_row(vacancy),
         [favorite_button,

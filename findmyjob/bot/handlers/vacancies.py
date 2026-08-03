@@ -254,9 +254,11 @@ class VacancyHandlers(HandlerGroup):
                     categories.append(vacancy.category)
                     hidden_changed = True
 
-            source.vacancies = [
-                v for v in source.vacancies if v.short_link not in hidden
-            ][:self._max_per_source]
+            kept = [v for v in source.vacancies if v.short_link not in hidden]
+            # NDA-All — один спільний список без пагінації категорій, тож
+            # ліміт "не більше N на джерело" (проти вибуху 1000+ карток при
+            # 5 звичайних категоріях) тут не застосовний — показуємо все.
+            source.vacancies = kept if source.name == NDA_CATEGORY else kept[:self._max_per_source]
 
         if hidden_changed:
             state.save_hidden()

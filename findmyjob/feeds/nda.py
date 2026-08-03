@@ -54,7 +54,11 @@ def _fetch_nda_vacancies() -> list[Vacancy]:
         logger.warning("[NDA] %s недоступний: %s", NDA_URL, exc)
         return []
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    # response.content (байти), а не response.text: requests вгадує кодування
+    # з заголовків, і без явного charset у Content-Type падає на latin-1 —
+    # кирилиця перетворюється на "ÐÐ½Ð¶ÐµÐ½ÐµÑ...". BeautifulSoup сам визначає
+    # кодування з байтів (у т.ч. з <meta charset>) і робить це правильно.
+    soup = BeautifulSoup(response.content, "html.parser")
     links = soup.find_all("a", href=_VACANCY_HREF_RE)
 
     raw: list[Vacancy] = []
