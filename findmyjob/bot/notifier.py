@@ -157,8 +157,7 @@ class NotificationDispatcher:
         state = self._states.user(context, sub.user_id)
 
         if not batch.vacancies:
-            # Мовчимо, якщо нема нових — щогодинне "нічого немає" тільки
-            # засмічувало чат, повідомлення й кнопка нікому не були потрібні.
+            await self._send_text(context, sub.chat_id, texts.MSG_NOTIFY_NOTHING_NEW)
             return
 
         # Позначаємо кожну картку одразу після надсилання, а не пачку в кінці:
