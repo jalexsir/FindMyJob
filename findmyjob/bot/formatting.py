@@ -62,7 +62,10 @@ def format_vacancy(vacancy: Vacancy) -> str:
     if salary and salary != SALARY_UNSPECIFIED:
         lines.append(f"💰 <b>Зарплата:</b> {html.escape(salary)}")
 
-    lines.append(f"📅 <b>Дата публікації:</b> {html.escape(format_date_ua(vacancy.published))}")
+    if vacancy.published:
+        lines.append(
+            f"📅 <b>Дата публікації:</b> {html.escape(format_date_ua(vacancy.published))}"
+        )
     lines.append(f"🌐 <b>Фільтр:</b> {html.escape(vacancy.source)}")
     return "\n".join(lines)
 
