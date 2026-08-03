@@ -25,6 +25,7 @@ from .categories import AVAILABLE_CATEGORIES, Site, Variant, build_sources
 from .dedup import merge_by_link, merge_by_title_and_company
 from .diagnostics import log_dedup, log_vacancy_list
 from .fetcher import FeedFetcher, FetchEvent, FetchListener
+from .nda import NDA_CATEGORY, get_nda_source
 
 DEFAULT_CACHE_TTL_SECONDS = 120
 
@@ -65,17 +66,23 @@ class VacancyFeedService:
         `on_event` отримує подію на кожну спробу завантаження — це те, з чого
         бот показує стан по джерелах. При влученні в кеш мережі не було, тож
         події синтезуються як успішні: дані все одно щойно звідти й приїхали.
+
+        `NDA_CATEGORY` — окрема гілка: спільний для всіх список з nda.in.ua
+        (без RSS, без дати, без злиття з DOU/Djinni), тож у стандартний
+        конвеєр стадій 1/2 і в `_Stage1Cache` вона не потрапляє взагалі —
+        інакше псувала б ключ кешу для звичайних RSS-категорій.
         """
         active_categories = categories or AVAILABLE_CATEGORIES
-        cache_key = tuple(sorted(active_categories))
+        rss_categories = [c for c in active_categories if c != NDA_CATEGORY]
+        cache_key = tuple(sorted(rss_categories))
 
         stage1 = self._cache.get(cache_key)
         from_cache = stage1 is not None
         if stage1 is None:
-            stage1 = self._build_stage1(active_categories, on_event)
+            stage1 = self._build_stage1(rss_categories, on_event)
             self._cache.put(cache_key, stage1)
         elif on_event is not None:
-            for source in build_sources(active_categories):
+            for source in build_sources(rss_categories):
                 on_event(FetchEvent(source=source, attempt=1, ok=True))
 
         log_dedup(
@@ -86,6 +93,7 @@ class VacancyFeedService:
 
         cutoff = _date_cutoff(days)
         return [
+            get_nda_source() if category == NDA_CATEGORY else
             self._merge_category(category, stage1.get(category, CategoryFeeds()), cutoff)
             for category in active_categories
         ]

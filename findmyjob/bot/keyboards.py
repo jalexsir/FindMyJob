@@ -10,7 +10,7 @@ from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup,
 )
 
-from findmyjob.feeds import AVAILABLE_CATEGORIES, Site
+from findmyjob.feeds import AVAILABLE_CATEGORIES, NDA_CATEGORY, Site
 from findmyjob.models import Vacancy
 
 from . import callbacks as cb
@@ -21,6 +21,11 @@ CATEGORIES_PER_PAGE = 10
 CATEGORIES_PER_ROW = 2
 # Більше — забагато RSS-запитів і занадто широке зведення
 MAX_SELECTED_CATEGORIES = 5
+
+# NDA-All — лише в пошуку: у сповіщеннях весь конвеєр побудований навколо дати
+# публікації й персонального SQLite-журналу, а в NDA дати публікації нема
+# взагалі, і список свідомо спільний, а не персональний.
+DISPLAY_CATEGORIES = AVAILABLE_CATEGORIES + [NDA_CATEGORY]
 
 
 @dataclass(frozen=True)
@@ -36,6 +41,7 @@ class CategoryFlow:
     page: str
     confirm: str
     confirm_label: str
+    categories: list[str]
 
 
 SEARCH_FLOW = CategoryFlow(
@@ -43,13 +49,33 @@ SEARCH_FLOW = CategoryFlow(
     page=cb.CB_CAT_PAGE,
     confirm=cb.CB_CAT_CONFIRM,
     confirm_label="▶️ Продовжити",
+    categories=DISPLAY_CATEGORIES,
 )
 NOTIFY_FLOW = CategoryFlow(
     toggle=cb.CB_NOTIFY_TOGGLE,
     page=cb.CB_NOTIFY_PAGE,
     confirm=cb.CB_NOTIFY_CONFIRM,
     confirm_label="🔔 Додати нотифікацію",
+    categories=AVAILABLE_CATEGORIES,
 )
+
+
+class NdaToggleBlocked(Exception):
+    """NDA-All обрана — інші категорії поки заблоковані."""
+
+
+def resolve_nda_toggle(selected: list[str], category: str) -> list[str] | None:
+    """Правила взаємовиключності для NDA-All.
+
+    Повертає новий список вибору, якщо клік стосувався NDA-правил, або `None`,
+    якщо клік до NDA не має стосунку — тоді викликач обробляє його як завжди.
+    Підіймає `NdaToggleBlocked`, якщо клік мав бути заблокований.
+    """
+    if category == NDA_CATEGORY:
+        return [] if category in selected else [NDA_CATEGORY]
+    if NDA_CATEGORY in selected:
+        raise NdaToggleBlocked()
+    return None
 
 
 def build_persistent_keyboard() -> ReplyKeyboardMarkup:
@@ -78,15 +104,15 @@ def build_category_keyboard(
     Позначки (✅/⬜) зберігаються при переході між сторінками, бо стан вибору не
     залежить від поточної сторінки.
     """
-    total_pages = max(1, -(-len(AVAILABLE_CATEGORIES) // CATEGORIES_PER_PAGE))
+    total_pages = max(1, -(-len(flow.categories) // CATEGORIES_PER_PAGE))
     page = max(0, min(page, total_pages - 1))
     start = page * CATEGORIES_PER_PAGE
-    page_categories = AVAILABLE_CATEGORIES[start:start + CATEGORIES_PER_PAGE]
+    page_categories = flow.categories[start:start + CATEGORIES_PER_PAGE]
 
     rows = [
         [
             InlineKeyboardButton(
-                f"{'✅' if category in selected else '⬜'} {category}",
+                _category_label(category, selected),
                 callback_data=cb.payload(flow.toggle, category),
             )
             for category in page_categories[i:i + CATEGORIES_PER_ROW]
@@ -103,6 +129,12 @@ def build_category_keyboard(
             callback_data=flow.confirm,
         )])
     return InlineKeyboardMarkup(rows)
+
+
+def _category_label(category: str, selected: list[str]) -> str:
+    mark = "✅" if category in selected else "⬜"
+    suffix = " 🔒" if category == NDA_CATEGORY else ""
+    return f"{mark} {category}{suffix}"
 
 
 def build_notification_footer_keyboard() -> InlineKeyboardMarkup:

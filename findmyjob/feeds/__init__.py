@@ -5,6 +5,7 @@ from .categories import (
     FeedSource, Site, Variant, build_sources,
 )
 from .fetcher import FeedFetcher
+from .nda import NDA_CATEGORY
 from .service import VacancyFeedService
 
 __all__ = [
@@ -13,6 +14,7 @@ __all__ = [
     "DOU_CATEGORY_MAP",
     "FeedFetcher",
     "FeedSource",
+    "NDA_CATEGORY",
     "Site",
     "VacancyFeedService",
     "Variant",

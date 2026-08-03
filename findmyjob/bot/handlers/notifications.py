@@ -18,8 +18,8 @@ from telegram.ext import BaseHandler, CallbackQueryHandler, ContextTypes
 from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
 from findmyjob.bot.keyboards import (
-    MAX_SELECTED_CATEGORIES, NOTIFY_FLOW, build_category_keyboard,
-    build_notifications_keyboard, build_notify_off_confirm_keyboard,
+    MAX_SELECTED_CATEGORIES, NOTIFY_FLOW, NdaToggleBlocked, build_category_keyboard,
+    build_notifications_keyboard, build_notify_off_confirm_keyboard, resolve_nda_toggle,
 )
 
 from .base import HandlerGroup
@@ -73,7 +73,15 @@ class NotificationHandlers(HandlerGroup):
         category = cb.argument(query.data, cb.CB_NOTIFY_TOGGLE)
         draft = session.notify_draft
 
-        if category in draft:
+        try:
+            override = resolve_nda_toggle(draft, category)
+        except NdaToggleBlocked:
+            await query.answer(texts.MSG_NDA_EXCLUSIVE, show_alert=True)
+            return
+
+        if override is not None:
+            draft = override
+        elif category in draft:
             draft.remove(category)
         elif len(draft) >= MAX_SELECTED_CATEGORIES:
             await query.answer(

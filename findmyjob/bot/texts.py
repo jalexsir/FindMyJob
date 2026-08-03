@@ -86,6 +86,7 @@ MSG_NOTIFY_OFF_CANCELLED = (
     "Обрати категорії можна кнопками нижче 👇"
 )
 MSG_NOTIFY_NOTHING_NEW = "🔔 На зараз не знайдено нових вакансій"
+MSG_NDA_EXCLUSIVE = "🔒 NDA-All — окрема категорія, її не можна поєднувати з іншими"
 MSG_HIDDEN_EMPTY = "📭 Список вилучених вакансій порожній."
 MSG_HIDDEN_ALREADY_EMPTY = "📭 Список пустий"
 MSG_FAVORITES_EMPTY = "⭐ Список обраних вакансій порожній."
