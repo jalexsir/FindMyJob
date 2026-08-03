@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Sequence
 
 from telegram import Update
@@ -18,6 +19,7 @@ from findmyjob.bot import texts
 from findmyjob.bot.keyboards import (
     build_category_keyboard, build_nda_all_confirm_keyboard,
     build_nda_baseline_confirm_keyboard, build_nda_new_confirm_keyboard,
+    build_reselect_keyboard,
 )
 from findmyjob.bot.sending import VacancySender
 from findmyjob.bot.state import StateRepository
@@ -66,15 +68,24 @@ class NdaActionHandlers(HandlerGroup):
             await self._prompt_reselect(update, context)
             return
 
-        current = get_nda_source().vacancies
+        session = self.session(update, context)
+        waiting = await message.reply_text(texts.MSG_FETCHING)
+        session.track(waiting.message_id)
+
+        # to_thread: get_nda_source() робить синхронний requests.get() — без
+        # цього мережевий запит блокував би весь event loop (усіх користувачів
+        # одночасно), а не лише цей чат. Найпомітніше на холодному кеші —
+        # тобто саме на першому виборі NDA-All.
+        current = (await asyncio.to_thread(get_nda_source)).vacancies
         baseline_links = self._states.store.load_nda_baseline_links()
         diff = [v for v in current if v.link not in baseline_links]
 
-        session = self.session(update, context)
         session.pending_vacancies = [v.to_dict() for v in diff]
         reply = await message.reply_text(
             texts.nda_new_summary(len(diff)),
-            reply_markup=build_nda_new_confirm_keyboard() if diff else None,
+            reply_markup=(
+                build_nda_new_confirm_keyboard() if diff else build_reselect_keyboard()
+            ),
         )
         session.track(reply.message_id)
 
@@ -89,12 +100,17 @@ class NdaActionHandlers(HandlerGroup):
             await self._prompt_reselect(update, context)
             return
 
-        current = get_nda_source().vacancies
         session = self.session(update, context)
+        waiting = await message.reply_text(texts.MSG_FETCHING)
+        session.track(waiting.message_id)
+
+        current = (await asyncio.to_thread(get_nda_source)).vacancies
         session.pending_vacancies = [v.to_dict() for v in current]
         reply = await message.reply_text(
             texts.nda_all_summary(len(current)),
-            reply_markup=build_nda_all_confirm_keyboard() if current else None,
+            reply_markup=(
+                build_nda_all_confirm_keyboard() if current else build_reselect_keyboard()
+            ),
         )
         session.track(reply.message_id)
 
@@ -107,7 +123,9 @@ class NdaActionHandlers(HandlerGroup):
         await query.edit_message_reply_markup(reply_markup=None)
         session = self.session(update, context)
         session.clear_pending()
-        message = await query.message.reply_text(texts.MSG_MAYBE_LATER)
+        message = await query.message.reply_text(
+            texts.MSG_MAYBE_LATER, reply_markup=build_reselect_keyboard()
+        )
         session.track(message.message_id)
 
     async def _send_pending(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -148,7 +166,7 @@ class NdaActionHandlers(HandlerGroup):
         await query.answer()
         await query.edit_message_reply_markup(reply_markup=None)
 
-        fresh = refresh_nda_source().vacancies
+        fresh = (await asyncio.to_thread(refresh_nda_source)).vacancies
         self._states.store.save_nda_baseline([(v.link, v.title) for v in fresh])
 
         session = self.session(update, context)
