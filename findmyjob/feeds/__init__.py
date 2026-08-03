@@ -5,7 +5,7 @@ from .categories import (
     FeedSource, Site, Variant, build_sources,
 )
 from .fetcher import FeedFetcher
-from .nda import NDA_CATEGORY
+from .nda import NDA_CATEGORY, NDA_SOURCE_NAME
 from .service import VacancyFeedService
 
 __all__ = [
@@ -15,6 +15,7 @@ __all__ = [
     "FeedFetcher",
     "FeedSource",
     "NDA_CATEGORY",
+    "NDA_SOURCE_NAME",
     "Site",
     "VacancyFeedService",
     "Variant",

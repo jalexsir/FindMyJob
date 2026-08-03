@@ -10,7 +10,7 @@ from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup,
 )
 
-from findmyjob.feeds import AVAILABLE_CATEGORIES, NDA_CATEGORY, Site
+from findmyjob.feeds import AVAILABLE_CATEGORIES, NDA_CATEGORY, NDA_SOURCE_NAME, Site
 from findmyjob.models import Vacancy
 
 from . import callbacks as cb
@@ -78,13 +78,30 @@ def resolve_nda_toggle(selected: list[str], category: str) -> list[str] | None:
     return None
 
 
-def build_persistent_keyboard() -> ReplyKeyboardMarkup:
-    """Головне меню, що завжди видно внизу."""
+def build_persistent_keyboard(
+    nda_mode: bool = False, is_admin: bool = False
+) -> ReplyKeyboardMarkup:
+    """Головне меню, що завжди видно внизу.
+
+    `nda_mode=True` — обрана лише категорія NDA-All: перший рядок замінюється
+    на її дії ("1 день / 7 днів / всі вакансії" тут не мають сенсу — це один
+    спільний список без дат публікації). `is_admin` додає туди ще й кнопку
+    оновлення еталону — лише для власника бота.
+    """
+    if nda_mode:
+        top_row = [KeyboardButton(texts.BTN_NDA_SHOW_NEW), KeyboardButton(texts.BTN_NDA_SHOW_ALL)]
+        if is_admin:
+            top_row.append(KeyboardButton(texts.BTN_NDA_UPDATE_BASELINE))
+    else:
+        top_row = [
+            KeyboardButton(texts.BTN_VAC_1D),
+            KeyboardButton(texts.BTN_VAC_7D),
+            KeyboardButton(texts.BTN_VAC_ALL),
+        ]
+
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton(texts.BTN_VAC_1D),
-             KeyboardButton(texts.BTN_VAC_7D),
-             KeyboardButton(texts.BTN_VAC_ALL)],
+            top_row,
             [KeyboardButton(texts.BTN_SHOW_HIDDEN),
              KeyboardButton(texts.BTN_FAVORITES),
              KeyboardButton(texts.BTN_NOTIFICATIONS)],
@@ -231,6 +248,14 @@ def build_vacancy_keyboard(vacancy: Vacancy, is_favorite: bool = False) -> Inlin
             cb.CB_UNFAVORITE if is_favorite else cb.CB_FAVORITE, short_link
         ),
     )
+    if vacancy.source == NDA_SOURCE_NAME:
+        # NDA-All — один спільний еталонний список, не персональна вибірка за
+        # категоріями: "Не показувати" тут ховати нема від чого (переобрати
+        # категорії, щоб вакансія зникла, не можна — вона єдина для всіх),
+        # тож лишаємо тільки Обране й Відкрити в одному рядку.
+        return InlineKeyboardMarkup([
+            [favorite_button, InlineKeyboardButton(texts.BTN_OPEN_VACANCY, url=vacancy.link)],
+        ])
     return InlineKeyboardMarkup([
         _open_vacancy_row(vacancy),
         [favorite_button,
@@ -315,6 +340,30 @@ def build_favorites_confirm_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_FAVS_NO),
         InlineKeyboardButton(texts.BTN_YES, callback_data=cb.CB_FAVS_YES),
+    ]])
+
+
+def build_nda_new_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Так/Ні під підсумком діффу ("Показати нові")."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_NDA_SHOW_NEW_NO),
+        InlineKeyboardButton(texts.BTN_YES, callback_data=cb.CB_NDA_SHOW_NEW_YES),
+    ]])
+
+
+def build_nda_all_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Так/Ні під підсумком повного списку ("Показати всі")."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_NDA_SHOW_ALL_NO),
+        InlineKeyboardButton(texts.BTN_YES, callback_data=cb.CB_NDA_SHOW_ALL_YES),
+    ]])
+
+
+def build_nda_baseline_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Так/Ні під запитом на оновлення еталону (лише адмін)."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_NDA_BASELINE_NO),
+        InlineKeyboardButton(texts.BTN_YES, callback_data=cb.CB_NDA_BASELINE_YES),
     ]])
 
 

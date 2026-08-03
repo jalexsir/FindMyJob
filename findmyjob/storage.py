@@ -79,11 +79,22 @@ CREATE TABLE IF NOT EXISTS notification_sent (
 );
 """
 
+# Еталонний список NDA-All — один спільний на всіх, без user_id. Пишеться
+# лише вручну (кнопка "Оновити еталон", адмін), ніколи автоматично — це
+# знімок стану на момент останнього оновлення, з яким звіряють "Показати нові".
+_NDA_BASELINE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS nda_baseline (
+    link  TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT ''
+);
+"""
+
 _TABLE_HIDDEN = "hidden"
 _TABLE_FAVORITES = "favorites"
 _TABLE_CHAT_STATE = "chat_state"
 _TABLE_NOTIFICATION_SUBS = "notification_subs"
 _TABLE_NOTIFICATION_SENT = "notification_sent"
+_TABLE_NDA_BASELINE = "nda_baseline"
 
 
 @dataclass(frozen=True)
@@ -133,6 +144,7 @@ class VacancyStore:
             conn.execute(_CHAT_STATE_SCHEMA)
             conn.execute(_NOTIFICATION_SUBS_SCHEMA)
             conn.execute(_NOTIFICATION_SENT_SCHEMA)
+            conn.execute(_NDA_BASELINE_SCHEMA)
 
     # ── Списки вакансій ──────────────────────────────────────────────────────
 
@@ -246,6 +258,24 @@ class VacancyStore:
             conn.execute(
                 f"DELETE FROM {_TABLE_NOTIFICATION_SENT} WHERE user_id = ?", (user_id,)
             )
+
+    # ── Еталонний список NDA-All ─────────────────────────────────────────────
+
+    def save_nda_baseline(self, entries: Iterable[tuple[str, str]]) -> None:
+        """Перезаписує еталон цілком — знімок, а не накопичення."""
+        rows = list(entries)
+        with self._connect() as conn:
+            conn.execute(f"DELETE FROM {_TABLE_NDA_BASELINE}")
+            if rows:
+                conn.executemany(
+                    f"INSERT INTO {_TABLE_NDA_BASELINE} (link, title) VALUES (?, ?)", rows
+                )
+
+    def load_nda_baseline_links(self) -> set[str]:
+        """Лише посилання — саме за ними звіряють "Показати нові"."""
+        with self._connect() as conn:
+            rows = conn.execute(f"SELECT link FROM {_TABLE_NDA_BASELINE}").fetchall()
+        return {row[0] for row in rows}
 
     # ── Внутрішні деталі ─────────────────────────────────────────────────────
 

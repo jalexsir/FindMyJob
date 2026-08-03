@@ -54,7 +54,11 @@ def _fetch_nda_vacancies() -> list[Vacancy]:
         logger.warning("[NDA] %s недоступний: %s", NDA_URL, exc)
         return []
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    # response.content (байти), а не response.text: requests вгадує кодування
+    # з заголовків, і без явного charset у Content-Type падає на latin-1 —
+    # кирилиця перетворюється на "ÐÐ½Ð¶ÐµÐ½ÐµÑ...". BeautifulSoup сам визначає
+    # кодування з байтів (у т.ч. з <meta charset>) і робить це правильно.
+    soup = BeautifulSoup(response.content, "html.parser")
     links = soup.find_all("a", href=_VACANCY_HREF_RE)
 
     raw: list[Vacancy] = []
@@ -136,4 +140,15 @@ def get_nda_source() -> MergedSource:
     if vacancies is None:
         vacancies = _fetch_nda_vacancies()
         _cache.put(vacancies)
+    return MergedSource(name=NDA_CATEGORY, vacancies=vacancies, duplicates=0)
+
+
+def refresh_nda_source() -> MergedSource:
+    """Примусово фетчить свіжий список, ігноруючи TTL-кеш, і одразу оновлює його.
+
+    Використовується лише явним оновленням еталону ("Оновити еталон") — там
+    потрібен саме поточний стан сайту, а не те, що лежить у кеші до 120 с.
+    """
+    vacancies = _fetch_nda_vacancies()
+    _cache.put(vacancies)
     return MergedSource(name=NDA_CATEGORY, vacancies=vacancies, duplicates=0)

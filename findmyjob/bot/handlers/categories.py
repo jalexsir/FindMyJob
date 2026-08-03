@@ -14,12 +14,18 @@ from findmyjob.bot.keyboards import (
     MAX_SELECTED_CATEGORIES, NdaToggleBlocked, build_category_keyboard,
     build_intro_continue_keyboard, build_persistent_keyboard, resolve_nda_toggle,
 )
+from findmyjob.bot.state import StateRepository
+from findmyjob.feeds import NDA_CATEGORY
 
 from .base import HandlerGroup
 
 
 class CategoryHandlers(HandlerGroup):
     """Вибір категорій — перший крок будь-якого сценарію."""
+
+    def __init__(self, states: StateRepository, admin_user_id: int | None = None) -> None:
+        super().__init__(states)
+        self._admin_user_id = admin_user_id
 
     def handlers(self) -> Sequence[BaseHandler]:
         return (
@@ -109,10 +115,22 @@ class CategoryHandlers(HandlerGroup):
         await query.edit_message_text(
             texts.categories_confirmed(selected), parse_mode=ParseMode.HTML
         )
+
+        nda_mode = selected == [NDA_CATEGORY]
+        is_admin = self._is_admin(update)
+        prompt = texts.MSG_PICK_NDA_ACTION if nda_mode else texts.MSG_PICK_PERIOD
         message = await query.message.chat.send_message(
-            texts.MSG_PICK_PERIOD, reply_markup=build_persistent_keyboard()
+            prompt, reply_markup=build_persistent_keyboard(nda_mode=nda_mode, is_admin=is_admin)
         )
         self.session(update, context).track(message.message_id)
+
+    def _is_admin(self, update: Update) -> bool:
+        user = update.effective_user
+        return (
+            user is not None
+            and self._admin_user_id is not None
+            and user.id == self._admin_user_id
+        )
 
     async def reselect(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Повертає до вибору категорій зі збереженим поточним вибором."""

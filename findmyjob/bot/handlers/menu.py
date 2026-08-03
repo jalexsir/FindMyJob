@@ -15,6 +15,7 @@ from .base import HandlerGroup
 from .favorites import FavoriteHandlers
 from .hidden import HiddenHandlers
 from .maintenance import MaintenanceHandlers
+from .nda import NdaActionHandlers
 from .notifications import NotificationHandlers
 from .vacancies import VacancyHandlers
 
@@ -38,6 +39,7 @@ class MenuHandlers(HandlerGroup):
         favorites: FavoriteHandlers,
         notifications: NotificationHandlers,
         maintenance: MaintenanceHandlers,
+        nda_actions: NdaActionHandlers,
     ) -> None:
         super().__init__(states)
         self._routes: dict[str, MenuAction] = {
@@ -53,6 +55,9 @@ class MenuHandlers(HandlerGroup):
                 u, c, chat_id=u.message.chat_id
             ),
             texts.BTN_CLEAR_HIDE: lambda u, c: hidden.clear_all(u.message.chat, u, c),
+            texts.BTN_NDA_SHOW_NEW: nda_actions.show_new,
+            texts.BTN_NDA_SHOW_ALL: nda_actions.show_all,
+            texts.BTN_NDA_UPDATE_BASELINE: nda_actions.prompt_update_baseline,
         }
         self._maintenance = maintenance
 
