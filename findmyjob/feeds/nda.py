@@ -10,8 +10,10 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -32,6 +34,12 @@ NDA_HEADERS = {"User-Agent": "FindMyJobAgregator/1.0"}
 NDA_TIMEOUT = 8
 NDA_CACHE_TTL_SECONDS = 120
 
+# Реальна сторінка віддає ВІДНОСНІ посилання ("./vacancy/slug"), а не
+# кореневі ("/vacancy/slug") — перевірено на живому HTTP-дампі з продакшн-
+# сервера (0 знайдених /vacancy/ при 200 OK і ~940 КБ тіла). Приймаємо обидва
+# варіанти на випадок, якщо сайт колись віддаватиме кореневі шляхи.
+_VACANCY_HREF_RE = re.compile(r"^\.?/vacancy/")
+
 
 def clean_title(text: str) -> str:
     """Прибирає зайві пробіли/переноси в сирому тексті посилання."""
@@ -47,20 +55,31 @@ def _fetch_nda_vacancies() -> list[Vacancy]:
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
-    links = soup.select('a[href^="/vacancy/"]')
+    links = soup.find_all("a", href=_VACANCY_HREF_RE)
 
     raw: list[Vacancy] = []
     for a in links:
         href = a.get("href")
         if not href:
             continue
-        title = clean_title(a.get_text(strip=True))
+        # Картка — це не тільки назва: поряд лежать теги-бейджі ("Бронювання",
+        # категорія), кожен у своєму <p>, без пробілу між ними в розмітці.
+        # a.get_text() на всій картці зліпив би їх у "НазваБронюванняКатегорія".
+        # Сама назва — єдиний <h6> усередині картки (перевірено на живому
+        # дампі: 226/226 карток мають рівно один). Якщо розмітка колись
+        # зміниться і <h6> зникне — відкат на весь текст картки, аби не
+        # впасти в 0 вакансій знову.
+        heading = a.find("h6")
+        raw_title = heading.get_text(strip=True) if heading else a.get_text(strip=True)
+        title = clean_title(raw_title)
         if not title:
             continue
         raw.append(Vacancy(
             source=NDA_SOURCE_NAME,
             title=title,
-            link="https://nda.in.ua" + href,
+            # urljoin, а не конкатенація рядків: href відносний ("./vacancy/x"),
+            # проста конкатенація дала б "https://nda.in.ua./vacancy/x".
+            link=urljoin(NDA_URL, href),
             category=NDA_CATEGORY,
         ))
 
