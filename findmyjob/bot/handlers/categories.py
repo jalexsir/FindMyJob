@@ -11,8 +11,8 @@ from telegram.ext import BaseHandler, CallbackQueryHandler, CommandHandler, Cont
 from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
 from findmyjob.bot.keyboards import (
-    MAX_SELECTED_CATEGORIES, build_category_keyboard, build_intro_continue_keyboard,
-    build_persistent_keyboard,
+    MAX_SELECTED_CATEGORIES, NdaToggleBlocked, build_category_keyboard,
+    build_intro_continue_keyboard, build_persistent_keyboard, resolve_nda_toggle,
 )
 
 from .base import HandlerGroup
@@ -58,7 +58,15 @@ class CategoryHandlers(HandlerGroup):
         category = cb.argument(query.data, cb.CB_CAT_TOGGLE)
         selected = state.categories
 
-        if category in selected:
+        try:
+            override = resolve_nda_toggle(selected, category)
+        except NdaToggleBlocked:
+            await query.answer(texts.MSG_NDA_EXCLUSIVE, show_alert=True)
+            return
+
+        if override is not None:
+            selected = override
+        elif category in selected:
             selected.remove(category)
         elif len(selected) >= MAX_SELECTED_CATEGORIES:
             await query.answer(
