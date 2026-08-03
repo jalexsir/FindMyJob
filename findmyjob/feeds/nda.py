@@ -62,7 +62,16 @@ def _fetch_nda_vacancies() -> list[Vacancy]:
         href = a.get("href")
         if not href:
             continue
-        title = clean_title(a.get_text(strip=True))
+        # Картка — це не тільки назва: поряд лежать теги-бейджі ("Бронювання",
+        # категорія), кожен у своєму <p>, без пробілу між ними в розмітці.
+        # a.get_text() на всій картці зліпив би їх у "НазваБронюванняКатегорія".
+        # Сама назва — єдиний <h6> усередині картки (перевірено на живому
+        # дампі: 226/226 карток мають рівно один). Якщо розмітка колись
+        # зміниться і <h6> зникне — відкат на весь текст картки, аби не
+        # впасти в 0 вакансій знову.
+        heading = a.find("h6")
+        raw_title = heading.get_text(strip=True) if heading else a.get_text(strip=True)
+        title = clean_title(raw_title)
         if not title:
             continue
         raw.append(Vacancy(
