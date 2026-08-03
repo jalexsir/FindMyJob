@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import queue
 from dataclasses import dataclass
 from datetime import date
@@ -21,7 +22,7 @@ from findmyjob.bot.keyboards import (
 from findmyjob.bot.progress import SourceProgress
 from findmyjob.bot.sending import VacancySender
 from findmyjob.bot.state import StateRepository, UserState
-from findmyjob.feeds import AVAILABLE_CATEGORIES, VacancyFeedService
+from findmyjob.feeds import AVAILABLE_CATEGORIES, NDA_CATEGORY, VacancyFeedService
 from findmyjob.feeds.categories import build_sources
 from findmyjob.models import Vacancy
 
@@ -50,6 +51,10 @@ DEDUP_REVEAL_PAUSE_SECONDS = 2.0
 # редагування цього повідомлення й наступне зведення прилітають практично
 # одночасно — людина не встигає прочитати, скільки саме дублікатів прибрали.
 DEDUP_DONE_PAUSE_SECONDS = 1.5
+
+# Запас від ліміту Telegram на довжину повідомлення (4096 символів) — під
+# HTML-теги посилань і на випадок дуже довгих назв.
+NDA_LIST_CHUNK_LIMIT = 3500
 
 
 @dataclass(frozen=True)
@@ -178,9 +183,19 @@ class VacancyHandlers(HandlerGroup):
             session.track(message.message_id)
             return
 
-        session.track(*await self._sender.send_all(
-            context.bot, query.message.chat_id, pending, state
-        ))
+        if state.categories == [NDA_CATEGORY]:
+            # NDA-All має лише назву й посилання — картка (картинка + порожні
+            # поля компанії/зарплати/дати) тут нічого не додає, тож замість
+            # картки на кожну вакансію шлемо компактний список текстом.
+            for chunk in _nda_list_chunks(pending):
+                message = await query.message.chat.send_message(
+                    chunk, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+                )
+                session.track(message.message_id)
+        else:
+            session.track(*await self._sender.send_all(
+                context.bot, query.message.chat_id, pending, state
+            ))
 
         days = self._parse_days(cb.argument(query.data, cb.CB_CONFIRM_YES))
         categories = ", ".join(state.categories or AVAILABLE_CATEGORIES)
@@ -282,20 +297,25 @@ class VacancyHandlers(HandlerGroup):
             return await asyncio.to_thread(self._feeds.fetch, days, categories)
 
         events: queue.Queue = queue.Queue()
-        progress = SourceProgress(build_sources(categories or AVAILABLE_CATEGORIES))
+        # NDA-All не має RSS-джерел (DOU/Djinni) — виключаємо її з рядка стану,
+        # інакше build_sources() згенерував би для неї хибні DOU/Djinni-запити
+        # і рядок "Djinni I ⏳ : ..." завис би назавжди (події для них ніколи
+        # не прийдуть, бо VacancyFeedService.fetch() її окремо не фетчить).
+        rss_categories = [c for c in (categories or AVAILABLE_CATEGORIES) if c != NDA_CATEGORY]
+        progress = SourceProgress(build_sources(rss_categories))
         task = asyncio.create_task(
             asyncio.to_thread(self._feeds.fetch, days, categories, events.put)
         )
 
         shown = progress.status_line()
-        if status is not None:
+        if status is not None and shown:
             await status(shown)
 
         async def refresh() -> None:
             """Показує рядок, якщо він змінився, і витримує паузу після зміни."""
             nonlocal shown
             line = progress.status_line()
-            if line == shown or status is None:
+            if line == shown or status is None or not line:
                 return
             shown = line
             await status(line)
@@ -388,6 +408,33 @@ class VacancyHandlers(HandlerGroup):
     @staticmethod
     def _parse_days(raw: str) -> int | None:
         return None if raw == ALL_TIME else int(raw)
+
+
+def _nda_list_chunks(pending: list[dict]) -> list[str]:
+    """Ділить список NDA-All на текстові блоки під ліміт Telegram.
+
+    Кожен рядок — клікабельне посилання з назвою. При великій кількості
+    вакансій повертає кілька повідомлень замість одного, що впало б з
+    "message is too long".
+    """
+    lines = [
+        f'{i}. <a href="{html.escape(v["link"])}">{html.escape(v["title"])}</a>'
+        for i, v in enumerate(pending, 1)
+    ]
+
+    chunks: list[str] = []
+    current: list[str] = []
+    length = 0
+    for line in lines:
+        if current and length + len(line) + 1 > NDA_LIST_CHUNK_LIMIT:
+            chunks.append("\n".join(current))
+            current = []
+            length = 0
+        current.append(line)
+        length += len(line) + 1
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
 
 
 def _publication_order(vacancy: Vacancy) -> tuple[bool, date]:
