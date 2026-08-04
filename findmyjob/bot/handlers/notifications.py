@@ -34,6 +34,7 @@ class NotificationHandlers(HandlerGroup):
             CallbackQueryHandler(self.toggle, pattern=cb.prefixed(cb.CB_NOTIFY_TOGGLE)),
             CallbackQueryHandler(self.change_page, pattern=cb.prefixed(cb.CB_NOTIFY_PAGE)),
             CallbackQueryHandler(self.confirm, pattern=cb.exact(cb.CB_NOTIFY_CONFIRM)),
+            CallbackQueryHandler(self.reset, pattern=cb.exact(cb.CB_NOTIFY_RESET)),
             CallbackQueryHandler(self.disable, pattern=cb.exact(cb.CB_NOTIFY_OFF)),
             CallbackQueryHandler(
                 self.confirm_disable, pattern=cb.exact(cb.CB_NOTIFY_OFF_YES)
@@ -90,6 +91,15 @@ class NotificationHandlers(HandlerGroup):
         await query.answer()
         session.notify_draft = draft
         await self._render(query, draft, session.category_page)
+
+    async def reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Знімає весь поточний вибір (чернетку) одним натисканням."""
+        query = update.callback_query
+        await query.answer()
+
+        session = self.session(update, context)
+        session.notify_draft = []
+        await self._render(query, [], session.category_page)
 
     async def change_page(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query

@@ -43,6 +43,7 @@ class CategoryFlow:
     page: str
     confirm: str
     confirm_label: str
+    reset: str
     categories: list[str]
     # Позначка 🔒 біля NDA-All має сенс лише там, де вона й справді
     # взаємовиключна (пошук) — у сповіщеннях це звичайна категорія.
@@ -54,6 +55,7 @@ SEARCH_FLOW = CategoryFlow(
     page=cb.CB_CAT_PAGE,
     confirm=cb.CB_CAT_CONFIRM,
     confirm_label="▶️ Продовжити",
+    reset=cb.CB_CAT_RESET,
     categories=DISPLAY_CATEGORIES,
 )
 NOTIFY_FLOW = CategoryFlow(
@@ -61,6 +63,7 @@ NOTIFY_FLOW = CategoryFlow(
     page=cb.CB_NOTIFY_PAGE,
     confirm=cb.CB_NOTIFY_CONFIRM,
     confirm_label="🔔 Додати нотифікацію",
+    reset=cb.CB_NOTIFY_RESET,
     categories=DISPLAY_CATEGORIES,
     nda_locked_badge=False,
 )
@@ -147,6 +150,9 @@ def build_category_keyboard(
         rows.append(_pagination_row(page, total_pages, flow))
 
     if selected:
+        rows.append([InlineKeyboardButton(
+            texts.BTN_RESET_CATEGORIES, callback_data=flow.reset,
+        )])
         rows.append([InlineKeyboardButton(
             f"{flow.confirm_label} ({len(selected)} обрано)",
             callback_data=flow.confirm,

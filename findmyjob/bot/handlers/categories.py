@@ -32,6 +32,7 @@ class CategoryHandlers(HandlerGroup):
             CommandHandler("start", self.start),
             CallbackQueryHandler(self.toggle, pattern=cb.prefixed(cb.CB_CAT_TOGGLE)),
             CallbackQueryHandler(self.confirm, pattern=cb.exact(cb.CB_CAT_CONFIRM)),
+            CallbackQueryHandler(self.reset, pattern=cb.exact(cb.CB_CAT_RESET)),
             CallbackQueryHandler(self.change_page, pattern=cb.prefixed(cb.CB_CAT_PAGE)),
             CallbackQueryHandler(self.noop, pattern=cb.exact(cb.CB_NOOP)),
             CallbackQueryHandler(self.reselect, pattern=cb.exact(cb.CB_RESELECT_CATS)),
@@ -86,6 +87,15 @@ class CategoryHandlers(HandlerGroup):
         await query.answer()
         state.set_categories(selected)
         await self._render_selection(query, selected, self.session(update, context).category_page)
+
+    async def reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Знімає весь поточний вибір категорій одним натисканням."""
+        query = update.callback_query
+        await query.answer()
+
+        state = self.user_state(update, context)
+        state.set_categories([])
+        await self._render_selection(query, [], self.session(update, context).category_page)
 
     async def change_page(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Перехід між сторінками (◀️/▶️) — вибір категорій не зникає."""
