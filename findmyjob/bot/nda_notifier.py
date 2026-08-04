@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from telegram.ext import ContextTypes
 
@@ -55,6 +56,9 @@ class NdaNotificationDispatcher:
             logger.info("[NDA-СПОВІЩЕННЯ] підписників немає — сайт не чіпаємо")
             return
 
+        logger.info("[NDA-СПОВІЩЕННЯ] старт: %d підписник(ів)", len(subscribers))
+        started = time.monotonic()
+
         # to_thread: get_nda_source() робить синхронний requests.get() і не
         # має блокувати event loop бота на час запиту.
         current = (await asyncio.to_thread(get_nda_source)).vacancies
@@ -66,12 +70,16 @@ class NdaNotificationDispatcher:
         store.save_nda_notification_baseline([(v.link, v.title) for v in current])
 
         logger.info(
-            "[NDA-СПОВІЩЕННЯ] %d підписник(ів), %d вакансій зараз, %d нових проти "
-            "попереднього знімку",
-            len(subscribers), len(current), len(diff),
+            "[NDA-СПОВІЩЕННЯ] завантажено %d вакансій, звірено з попереднім "
+            "знімком (%d), нових — %d",
+            len(current), len(baseline_links), len(diff),
         )
 
         if not diff:
+            logger.info(
+                "[NDA-СПОВІЩЕННЯ] прохід завершено за %.1f с — нових немає, нікому не шлемо",
+                time.monotonic() - started,
+            )
             return
 
         payload = [v.to_dict() for v in diff]
@@ -89,6 +97,8 @@ class NdaNotificationDispatcher:
                 logger.warning(
                     "[NDA-СПОВІЩЕННЯ] збій обробки користувача %s: %s", sub.user_id, result
                 )
+
+        logger.info("[NDA-СПОВІЩЕННЯ] прохід завершено за %.1f с", time.monotonic() - started)
 
     async def _deliver(
         self, sub: NotificationSub, payload: list[dict], context: ContextTypes.DEFAULT_TYPE
@@ -113,6 +123,7 @@ class NdaNotificationDispatcher:
 
         if not sent:
             return
+        logger.info("[NDA-СПОВІЩЕННЯ] користувач %s: надіслано %d", sub.user_id, sent)
         try:
             await context.bot.send_message(
                 sub.chat_id,
