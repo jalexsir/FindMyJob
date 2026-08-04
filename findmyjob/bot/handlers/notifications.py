@@ -18,11 +18,11 @@ from telegram.ext import BaseHandler, CallbackQueryHandler, ContextTypes
 from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
 from findmyjob.bot.keyboards import (
-    MAX_SELECTED_CATEGORIES, NOTIFY_FLOW, build_category_keyboard,
-    build_notifications_keyboard, build_notify_off_confirm_keyboard,
+    NOTIFY_FLOW, CategoryToggleBlocked, build_notifications_keyboard,
+    build_notify_off_confirm_keyboard, toggle_category,
 )
 
-from .base import HandlerGroup
+from .base import HandlerGroup, render_category_selection
 
 
 class NotificationHandlers(HandlerGroup):
@@ -75,18 +75,12 @@ class NotificationHandlers(HandlerGroup):
         query = update.callback_query
         session = self.session(update, context)
         category = cb.argument(query.data, cb.CB_NOTIFY_TOGGLE)
-        draft = session.notify_draft
 
-        if category in draft:
-            draft.remove(category)
-        elif len(draft) >= MAX_SELECTED_CATEGORIES:
-            await query.answer(
-                f"Ви можете обрати тільки {MAX_SELECTED_CATEGORIES} категорій одночасно",
-                show_alert=True,
-            )
+        try:
+            draft = toggle_category(session.notify_draft, category, nda_exclusive=False)
+        except CategoryToggleBlocked as exc:
+            await query.answer(exc.message, show_alert=True)
             return
-        else:
-            draft.append(category)
 
         await query.answer()
         session.notify_draft = draft
@@ -164,8 +158,4 @@ class NotificationHandlers(HandlerGroup):
 
     @staticmethod
     async def _render(query, draft: list[str], page: int) -> None:
-        await query.edit_message_text(
-            texts.notifications_status(draft),
-            parse_mode=ParseMode.HTML,
-            reply_markup=build_category_keyboard(draft, page, NOTIFY_FLOW),
-        )
+        await render_category_selection(query, draft, page, texts.notifications_status, NOTIFY_FLOW)

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Sequence
+from typing import Callable, Sequence
 
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.ext import BaseHandler, ContextTypes
 
+from findmyjob.bot.keyboards import SEARCH_FLOW, CategoryFlow, build_category_keyboard
 from findmyjob.bot.state import ChatSession, StateRepository, UserState
 from findmyjob.bot.texts import DEFAULT_VACANCY_TITLE
 
@@ -32,6 +34,26 @@ class HandlerGroup(ABC):
 
     def session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> ChatSession:
         return self._states.chat(update, context)
+
+
+async def render_category_selection(
+    query,
+    selected: list[str],
+    page: int,
+    status_text: Callable[[list[str]], str],
+    flow: CategoryFlow = SEARCH_FLOW,
+) -> None:
+    """Перемальовує повідомлення вибору категорій: текст стану + клавіатура.
+
+    Спільне для пошуку й сповіщень — сценарії відрізняються лише функцією
+    тексту (`texts.categories_status`/`notifications_status`) і флоу
+    клавіатури (`SEARCH_FLOW`/`NOTIFY_FLOW`).
+    """
+    await query.edit_message_text(
+        status_text(selected),
+        parse_mode=ParseMode.HTML,
+        reply_markup=build_category_keyboard(selected, page, flow),
+    )
 
 
 def title_from_caption(caption: str | None) -> str:

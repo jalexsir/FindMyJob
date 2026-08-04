@@ -11,13 +11,13 @@ from telegram.ext import BaseHandler, CallbackQueryHandler, CommandHandler, Cont
 from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
 from findmyjob.bot.keyboards import (
-    MAX_SELECTED_CATEGORIES, NdaToggleBlocked, build_category_keyboard,
-    build_intro_continue_keyboard, build_persistent_keyboard, resolve_nda_toggle,
+    CategoryToggleBlocked, build_intro_continue_keyboard, build_persistent_keyboard,
+    toggle_category,
 )
 from findmyjob.bot.state import StateRepository
 from findmyjob.feeds import NDA_CATEGORY
 
-from .base import HandlerGroup
+from .base import HandlerGroup, render_category_selection
 
 
 class CategoryHandlers(HandlerGroup):
@@ -63,26 +63,12 @@ class CategoryHandlers(HandlerGroup):
         query = update.callback_query
         state = self.user_state(update, context)
         category = cb.argument(query.data, cb.CB_CAT_TOGGLE)
-        selected = state.categories
 
         try:
-            override = resolve_nda_toggle(selected, category)
-        except NdaToggleBlocked:
-            await query.answer(texts.MSG_NDA_EXCLUSIVE, show_alert=True)
+            selected = toggle_category(state.categories, category, nda_exclusive=True)
+        except CategoryToggleBlocked as exc:
+            await query.answer(exc.message, show_alert=True)
             return
-
-        if override is not None:
-            selected = override
-        elif category in selected:
-            selected.remove(category)
-        elif len(selected) >= MAX_SELECTED_CATEGORIES:
-            await query.answer(
-                f"Ви можете обрати тільки {MAX_SELECTED_CATEGORIES} категорій одночасно",
-                show_alert=True,
-            )
-            return
-        else:
-            selected.append(category)
 
         await query.answer()
         state.set_categories(selected)
@@ -155,8 +141,4 @@ class CategoryHandlers(HandlerGroup):
 
     @staticmethod
     async def _render_selection(query, selected: list[str], page: int) -> None:
-        await query.edit_message_text(
-            texts.categories_status(selected),
-            parse_mode=ParseMode.HTML,
-            reply_markup=build_category_keyboard(selected, page),
-        )
+        await render_category_selection(query, selected, page, texts.categories_status)

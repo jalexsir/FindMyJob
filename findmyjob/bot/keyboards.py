@@ -69,22 +69,45 @@ NOTIFY_FLOW = CategoryFlow(
 )
 
 
-class NdaToggleBlocked(Exception):
-    """NDA-All обрана — інші категорії поки заблоковані."""
+class CategoryToggleBlocked(Exception):
+    """Клік по категорії відхилено — квота вичерпана або (лише в пошуку)
+    зачеплено взаємовиключність NDA-All. `message` — текст для алерту."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
 
 
-def resolve_nda_toggle(selected: list[str], category: str) -> list[str] | None:
-    """Правила взаємовиключності для NDA-All.
+def toggle_category(
+    selected: list[str], category: str, *, nda_exclusive: bool
+) -> list[str]:
+    """Повертає НОВИЙ список вибору після кліку по категорії.
 
-    Повертає новий список вибору, якщо клік стосувався NDA-правил, або `None`,
-    якщо клік до NDA не має стосунку — тоді викликач обробляє його як завжди.
-    Підіймає `NdaToggleBlocked`, якщо клік мав бути заблокований.
+    Спільна для пошуку й сповіщень: обидва сценарії — той самий toggle з тим
+    самим лімітом (`MAX_SELECTED_CATEGORIES`), різниця лише в
+    `nda_exclusive`. У пошуку (`True`) NDA-All — самодостатній конвеєр без
+    RSS/дати публікації, тож обрання скидає решту, а спроба додати щось
+    інше, поки вона активна, блокується. У сповіщеннях (`False`) NDA-All —
+    звичайна категорія в тій самій квоті: власний шкедулер сам зводить її
+    дифф незалежно від решти обраного, поєднувати можна.
+
+    Підіймає `CategoryToggleBlocked`, якщо клік має бути відхилений.
     """
-    if category == NDA_CATEGORY:
-        return [] if category in selected else [NDA_CATEGORY]
-    if NDA_CATEGORY in selected:
-        raise NdaToggleBlocked()
-    return None
+    if nda_exclusive:
+        if category == NDA_CATEGORY:
+            return [] if category in selected else [NDA_CATEGORY]
+        if NDA_CATEGORY in selected:
+            raise CategoryToggleBlocked(texts.MSG_NDA_EXCLUSIVE)
+
+    if category in selected:
+        selected.remove(category)
+        return selected
+    if len(selected) >= MAX_SELECTED_CATEGORIES:
+        raise CategoryToggleBlocked(
+            f"Ви можете обрати тільки {MAX_SELECTED_CATEGORIES} категорій одночасно"
+        )
+    selected.append(category)
+    return selected
 
 
 def build_persistent_keyboard(
@@ -173,28 +196,28 @@ def build_notification_footer_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def _yes_no_keyboard(yes_callback: str, no_callback: str) -> InlineKeyboardMarkup:
+    """Стандартна пара Так/Ні (Ні зліва, Так справа) — усі підтвердження в
+    боті виглядають однаково, тож будують клавіатуру через цей хелпер."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(texts.BTN_NO, callback_data=no_callback),
+        InlineKeyboardButton(texts.BTN_YES, callback_data=yes_callback),
+    ]])
+
+
 def build_notify_off_confirm_keyboard() -> InlineKeyboardMarkup:
     """Так/Ні на питання про вимкнення сповіщень."""
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_NOTIFY_OFF_NO),
-        InlineKeyboardButton(texts.BTN_YES, callback_data=cb.CB_NOTIFY_OFF_YES),
-    ]])
+    return _yes_no_keyboard(cb.CB_NOTIFY_OFF_YES, cb.CB_NOTIFY_OFF_NO)
 
 
 def build_clear_confirm_keyboard() -> InlineKeyboardMarkup:
     """Так/Ні на питання про очищення листування."""
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_CLEAR_NO),
-        InlineKeyboardButton(texts.BTN_YES, callback_data=cb.CB_CLEAR_YES),
-    ]])
+    return _yes_no_keyboard(cb.CB_CLEAR_YES, cb.CB_CLEAR_NO)
 
 
 def build_clear_hidden_confirm_keyboard() -> InlineKeyboardMarkup:
     """Так/Ні на питання про очищення списку вилучених."""
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_CLEAR_HIDE_NO),
-        InlineKeyboardButton(texts.BTN_YES, callback_data=cb.CB_CLEAR_HIDE_YES),
-    ]])
+    return _yes_no_keyboard(cb.CB_CLEAR_HIDE_YES, cb.CB_CLEAR_HIDE_NO)
 
 
 def build_notifications_keyboard(subscribed: bool) -> InlineKeyboardMarkup:
@@ -349,34 +372,22 @@ def build_confirm_show_keyboard(days: int | None) -> InlineKeyboardMarkup:
 
 
 def build_favorites_confirm_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_FAVS_NO),
-        InlineKeyboardButton(texts.BTN_YES, callback_data=cb.CB_FAVS_YES),
-    ]])
+    return _yes_no_keyboard(cb.CB_FAVS_YES, cb.CB_FAVS_NO)
 
 
 def build_nda_new_confirm_keyboard() -> InlineKeyboardMarkup:
     """Так/Ні під підсумком діффу ("Показати нові")."""
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_NDA_SHOW_NEW_NO),
-        InlineKeyboardButton(texts.BTN_YES, callback_data=cb.CB_NDA_SHOW_NEW_YES),
-    ]])
+    return _yes_no_keyboard(cb.CB_NDA_SHOW_NEW_YES, cb.CB_NDA_SHOW_NEW_NO)
 
 
 def build_nda_all_confirm_keyboard() -> InlineKeyboardMarkup:
     """Так/Ні під підсумком повного списку ("Показати всі")."""
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_NDA_SHOW_ALL_NO),
-        InlineKeyboardButton(texts.BTN_YES, callback_data=cb.CB_NDA_SHOW_ALL_YES),
-    ]])
+    return _yes_no_keyboard(cb.CB_NDA_SHOW_ALL_YES, cb.CB_NDA_SHOW_ALL_NO)
 
 
 def build_nda_baseline_confirm_keyboard() -> InlineKeyboardMarkup:
     """Так/Ні під запитом на оновлення еталону (лише адмін)."""
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton(texts.BTN_NO, callback_data=cb.CB_NDA_BASELINE_NO),
-        InlineKeyboardButton(texts.BTN_YES, callback_data=cb.CB_NDA_BASELINE_YES),
-    ]])
+    return _yes_no_keyboard(cb.CB_NDA_BASELINE_YES, cb.CB_NDA_BASELINE_NO)
 
 
 def replace_button(
