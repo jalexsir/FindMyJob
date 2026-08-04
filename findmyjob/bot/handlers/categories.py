@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Sequence
 
 from telegram import Update
@@ -18,6 +19,8 @@ from findmyjob.bot.state import StateRepository
 from findmyjob.feeds import NDA_CATEGORY
 
 from .base import HandlerGroup, render_category_selection
+
+logger = logging.getLogger(__name__)
 
 
 class CategoryHandlers(HandlerGroup):
@@ -44,6 +47,7 @@ class CategoryHandlers(HandlerGroup):
         session.start_message_id = update.message.message_id
         session.category_page = 0
         self.user_state(update, context).set_categories([])
+        self._log_if_new_user(update)
 
         intro = await update.message.reply_text(texts.MSG_INTRO, parse_mode=ParseMode.HTML)
         session.track(intro.message_id)
@@ -52,6 +56,21 @@ class CategoryHandlers(HandlerGroup):
             texts.MSG_INTRO_FOOTER, reply_markup=build_intro_continue_keyboard()
         )
         session.track(footer.message_id)
+
+    def _log_if_new_user(self, update: Update) -> None:
+        """Рахує унікальних користувачів за весь час у БД (`known_users`).
+
+        Логуємо список і тотал лише коли user_id справді новий — повторні
+        /start того самого юзера не мають засмічувати лог тим самим списком.
+        """
+        user = update.effective_user
+        if user is None or not self._states.store.register_user(user.id):
+            return
+        user_ids = self._states.store.load_known_user_ids()
+        logger.info(
+            "[КОРИСТУВАЧІ] новий користувач %s. Усього унікальних: %d. Список: %s",
+            user.id, len(user_ids), ", ".join(str(uid) for uid in user_ids),
+        )
 
     async def continue_intro(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Кнопка «Продовжити» під інтро — показує вибір категорій."""

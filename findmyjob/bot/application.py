@@ -81,6 +81,7 @@ class BotApplication:
         application = Application.builder().token(self._settings.bot_token).build()
 
         self._store.init_db()
+        self._backfill_known_users()
         self._preload_state(application)
 
         for group in self._groups:
@@ -138,6 +139,20 @@ class BotApplication:
         application = self.build()
         logger.info("Бот запущений. Ctrl+C для зупинки.")
         application.run_polling()
+
+    def _backfill_known_users(self) -> None:
+        """Наповнює known_users історичними user_id, якщо вона ще порожня.
+
+        Таблиця з'явилась пізніше за chat_state, тож на вже працюючому боті
+        вона інакше показувала б лише тих, хто напише /start ПІСЛЯ деплою
+        цієї фічі. no-op, якщо known_users вже непорожня (наступні user_id
+        туди додає CategoryHandlers._log_if_new_user() при кожному /start).
+        """
+        added = self._store.backfill_known_users_from_chat_state()
+        if added:
+            logger.info(
+                "known_users: перенесено %d історичних user_id із chat_state", added
+            )
 
     def _preload_state(self, application: Application) -> None:
         """Підвантажує "Вилучені", "Обране" й підписки з БД у bot_data."""
