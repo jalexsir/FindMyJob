@@ -21,7 +21,7 @@ from bs4 import BeautifulSoup
 from findmyjob.models import MergedSource, Vacancy
 
 from .dedup import merge_by_link
-from .parsing.text import collapse_spaces
+from .parsing.text import collapse_spaces, unescape_twice
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +81,13 @@ _TITLE_EXCLUDE_PHRASES_LOWER = tuple(phrase.lower() for phrase in _TITLE_EXCLUDE
 
 
 def clean_title(text: str) -> str:
-    """Прибирає зайві пробіли/переноси в сирому тексті посилання."""
-    return collapse_spaces(text)
+    """Прибирає зайві пробіли/переноси й розекранує HTML-сутності.
+
+    Сайт віддає деякі назви двічі екранованими (`Network &amp;amp; Hardware`
+    у сирому HTML), тож звичайного розбору BeautifulSoup недостатньо —
+    `&amp;` лишається в тексті буквально замість `&`.
+    """
+    return collapse_spaces(unescape_twice(text))
 
 
 def _is_manager_excluded(lowered_title: str) -> bool:
