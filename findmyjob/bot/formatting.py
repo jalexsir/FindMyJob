@@ -13,6 +13,11 @@ from .texts import period_phrase, vacancies_word
 
 SALARY_UNSPECIFIED = "не вказано"
 
+# Джерела RSS-категорій завжди мають цей суфікс у MergedSource.name
+# (findmyjob/feeds/service.py) — у зведенні він винесений у заголовок один раз,
+# тож зі списку категорій його прибираємо, щоб не повторювати на кожному рядку.
+_RESERVATION_SUFFIX = " (з бронюванням)"
+
 _WHITESPACE_RE = re.compile(r"[\s\xa0]+")
 _RANGE_RE = re.compile(r"\d[\s]*[–\-][\s]*\d")
 _LEADING_FROM_RE = re.compile(r"\bвід\b\s*", re.IGNORECASE)
@@ -80,17 +85,20 @@ def build_summary(sources: list[MergedSource], days: int | None, hidden_count: i
     total_found = available + hidden_count
 
     header = (
-        f"{period_phrase(days).capitalize()} знайдено "
-        f"{total_found} {vacancies_word(total_found)}"
+        f"{period_phrase(days).capitalize()} знайдено - "
+        f"{total_found} {vacancies_word(total_found)} з бронюванням"
     )
     if hidden_count:
-        header += (
-            f", з них {hidden_count} в списку вилучених, "
-            f"до перегляду доступно {available} {vacancies_word(available)}"
+        header = (
+            f"{header}, з них - {hidden_count} в списку вилучених.\n"
+            f"До перегляду доступно {available} {vacancies_word(available)}:"
         )
+    else:
+        header += ":"
 
-    lines = [f"🗂 <b>{header}:</b>\n"]
+    lines = [f"🗂 <b>{header}</b>\n"]
     for source in sources:
         count = len(source.vacancies)
-        lines.append(f"  • {source.name} — {count} {vacancies_word(count)}")
+        name = source.name.removesuffix(_RESERVATION_SUFFIX)
+        lines.append(f"  • {name} ({count})")
     return "\n".join(lines)
