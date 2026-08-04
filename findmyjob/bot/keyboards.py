@@ -137,8 +137,7 @@ def build_persistent_keyboard(
             [KeyboardButton(texts.BTN_SHOW_HIDDEN),
              KeyboardButton(texts.BTN_FAVORITES),
              KeyboardButton(texts.BTN_NOTIFICATIONS)],
-            [KeyboardButton(texts.BTN_CLEAR),
-             KeyboardButton(texts.BTN_CLEAR_HIDE)],
+            [KeyboardButton(texts.BTN_MORE)],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -187,6 +186,18 @@ def _category_label(category: str, selected: list[str], show_lock: bool) -> str:
     mark = "✅" if category in selected else "⬜"
     suffix = " 🔒" if category == NDA_CATEGORY and show_lock else ""
     return f"{mark} {category}{suffix}"
+
+
+def build_more_menu_keyboard() -> InlineKeyboardMarkup:
+    """Підменю під кнопкою "⚙️ Ще" — рідковживані обслуговуючі дії, прибрані з
+    постійного меню, аби воно не пухнуло довгими підписами. callback_data —
+    ті самі CB_CLEAR / CB_CLEAR_HIDE, що й раніше отримували текстові кнопки:
+    обробники (MaintenanceHandlers.clear_history, HiddenHandlers.clear) уже
+    вміли реагувати саме на ці callback_data, тож нова логіка не знадобилась."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_CLEAR, callback_data=cb.CB_CLEAR)],
+        [InlineKeyboardButton(texts.BTN_CLEAR_HIDE, callback_data=cb.CB_CLEAR_HIDE)],
+    ])
 
 
 def build_notification_footer_keyboard() -> InlineKeyboardMarkup:
