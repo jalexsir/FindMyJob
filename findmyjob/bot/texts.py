@@ -201,7 +201,7 @@ def notifications_saved(selected: list[str]) -> str:
 def nda_new_summary(count: int) -> str:
     """Підсумок діффу проти еталонного списку ("Показати нові")."""
     if not count:
-        return "🆕 Нових вакансій (яких немає в еталонному списку) не знайдено."
+        return "🆕 Нових вакансій за сьогодні не знайдено."
     return f"🆕 Знайдено {count} {vacancies_word(count)}, яких немає в еталонному списку."
 
 
