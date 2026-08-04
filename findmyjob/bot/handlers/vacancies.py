@@ -17,6 +17,7 @@ from findmyjob.bot import texts
 from findmyjob.bot.formatting import build_summary
 from findmyjob.bot.keyboards import (
     build_category_keyboard, build_confirm_show_keyboard, build_no_vacancies_keyboard,
+    build_reselect_keyboard,
 )
 from findmyjob.bot.progress import SourceProgress
 from findmyjob.bot.sending import VacancySender
@@ -198,7 +199,9 @@ class VacancyHandlers(HandlerGroup):
         session = self.session(update, context)
         session.clear_pending()
         await query.edit_message_reply_markup(reply_markup=None)
-        message = await query.message.reply_text(texts.MSG_MAYBE_LATER)
+        message = await query.message.reply_text(
+            texts.MSG_MAYBE_LATER, reply_markup=build_reselect_keyboard()
+        )
         session.track(message.message_id)
 
     # ── Ядро: завантаження й підготовка вибірки ──────────────────────────────
