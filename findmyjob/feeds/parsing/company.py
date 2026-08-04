@@ -116,6 +116,12 @@ _TAG_ONLY_RE = re.compile(r"<[^>]+>")
 _YEARS_RE = re.compile(r"^\d+[\+]?\s*(?:рок|рік|year|міс)")
 _NON_WORD_RE = re.compile(r"[^\w]")
 
+# "Створюємо власні продукти повного циклу" — типовий опис зі скинутим
+# займенником ("(Ми) створюємо…"), не назва компанії. Реальні назви компаній
+# не закінчуються на дієслівні суфікси 1-ї особи множини ("-ємо", "-имо",
+# "-мось"/"-мося" — "розробляємо", "працюємо", "займаємось").
+_DROPPED_SUBJECT_VERB_RE = re.compile(r"(?:ємо|имо|мось|мося)$", re.IGNORECASE)
+
 MAX_COMPANY_LENGTH = 60
 MAX_DOU_COMPANY_LENGTH = 100
 MAX_COMPANY_WORDS = 5
@@ -158,7 +164,7 @@ def is_invalid_company(text: str, title: str = "") -> bool:
 
     words = candidate.split()
     first_word = words[0].lower().strip(_TRIM_CHARS) if words else ""
-    if first_word in GENERIC_LEADING_WORDS:
+    if first_word in GENERIC_LEADING_WORDS or _DROPPED_SUBJECT_VERB_RE.search(first_word):
         return True
 
     # Самі лише займенники/загальні іменники ("Ми", "Наша команда") — це початок
@@ -231,10 +237,11 @@ def is_invalid_dou_company(text: str, title: str = "") -> bool:
     # "414 окрема бригада безпілотних систем «Птахи Мадяра»" — валідна назва.
     if _starts_lowercase(candidate):
         return True
-    # Ті самі бейджі-плейсхолдери, що й для Djinni (GENERIC_LEADING_WORDS) —
-    # довгі офіційні назви військових частин ними не починаються.
+    # Ті самі бейджі-плейсхолдери й дієслова зі скинутим займенником, що й для
+    # Djinni (GENERIC_LEADING_WORDS/_DROPPED_SUBJECT_VERB_RE) — довгі офіційні
+    # назви військових частин ними не починаються.
     first_word = candidate.split()[0].lower().strip(_TRIM_CHARS) if candidate.split() else ""
-    if first_word in GENERIC_LEADING_WORDS:
+    if first_word in GENERIC_LEADING_WORDS or _DROPPED_SUBJECT_VERB_RE.search(first_word):
         return True
     if not title:
         return False
