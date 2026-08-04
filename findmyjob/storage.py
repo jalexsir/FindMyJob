@@ -107,6 +107,17 @@ _TABLE_NOTIFICATION_SUBS = "notification_subs"
 _TABLE_NOTIFICATION_SENT = "notification_sent"
 _TABLE_NDA_BASELINE = "nda_baseline"
 _TABLE_NDA_NOTIFICATION_BASELINE = "nda_notification_baseline"
+_TABLE_KNOWN_USERS = "known_users"
+
+# Лічильник унікальних користувачів за весь час — user_id фіксується один раз,
+# при першому /start; повторні запуски того самого юзера INSERT OR IGNORE
+# просто не чіпають.
+_KNOWN_USERS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS known_users (
+    user_id    INTEGER PRIMARY KEY,
+    first_seen TEXT    NOT NULL
+);
+"""
 
 
 @dataclass(frozen=True)
@@ -158,6 +169,7 @@ class VacancyStore:
             conn.execute(_NOTIFICATION_SENT_SCHEMA)
             conn.execute(_NDA_BASELINE_SCHEMA)
             conn.execute(_NDA_NOTIFICATION_BASELINE_SCHEMA)
+            conn.execute(_KNOWN_USERS_SCHEMA)
 
     # ── Списки вакансій ──────────────────────────────────────────────────────
 
@@ -311,6 +323,28 @@ class VacancyStore:
                 f"SELECT link FROM {_TABLE_NDA_NOTIFICATION_BASELINE}"
             ).fetchall()
         return {row[0] for row in rows}
+
+    # ── Лічильник унікальних користувачів ────────────────────────────────────
+
+    def register_user(self, user_id: int) -> bool:
+        """Фіксує першу появу користувача. Повертає True, лише якщо це справді
+        новий (раніше не бачений) user_id — повторний /start того самого
+        юзера INSERT OR IGNORE просто пропускає."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"INSERT OR IGNORE INTO {_TABLE_KNOWN_USERS} (user_id, first_seen) "
+                f"VALUES (?, ?)",
+                (user_id, datetime.now().isoformat()),
+            )
+            return cursor.rowcount > 0
+
+    def load_known_user_ids(self) -> list[int]:
+        """Усі user_id, що коли-небудь запускали бота, у порядку появи."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT user_id FROM {_TABLE_KNOWN_USERS} ORDER BY first_seen"
+            ).fetchall()
+        return [row[0] for row in rows]
 
     # ── Внутрішні деталі ─────────────────────────────────────────────────────
 
