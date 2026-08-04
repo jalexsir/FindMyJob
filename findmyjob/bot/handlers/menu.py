@@ -9,6 +9,7 @@ from telegram import Update
 from telegram.ext import BaseHandler, ContextTypes, MessageHandler, filters
 
 from findmyjob.bot import texts
+from findmyjob.bot.keyboards import build_more_menu_keyboard
 from findmyjob.bot.state import StateRepository
 
 from .base import HandlerGroup
@@ -51,10 +52,7 @@ class MenuHandlers(HandlerGroup):
             texts.BTN_NOTIFICATIONS: lambda u, c: notifications.send_prompt(
                 u.message.chat, u, c
             ),
-            texts.BTN_CLEAR: lambda u, c: maintenance.send_clear_prompt(
-                u, c, chat_id=u.message.chat_id
-            ),
-            texts.BTN_CLEAR_HIDE: lambda u, c: hidden.clear_all(u.message.chat, u, c),
+            texts.BTN_MORE: self._show_more_menu,
             texts.BTN_NDA_SHOW_NEW: nda_actions.show_new,
             texts.BTN_NDA_SHOW_ALL: nda_actions.show_all,
             texts.BTN_NDA_UPDATE_BASELINE: nda_actions.prompt_update_baseline,
@@ -74,3 +72,11 @@ class MenuHandlers(HandlerGroup):
         action = self._routes.get(update.message.text)
         if action is not None:
             await action(update, context)
+
+    async def _show_more_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """"⚙️ Ще" — рідковживані дії (очищення) інлайн-підменю замість
+        окремих кнопок постійного меню."""
+        message = await update.message.reply_text(
+            texts.MSG_MORE_MENU, reply_markup=build_more_menu_keyboard()
+        )
+        self.session(update, context).track(message.message_id)
