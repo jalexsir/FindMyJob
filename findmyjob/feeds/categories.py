@@ -16,7 +16,7 @@ from urllib.parse import quote
 # Найпопулярніші мови програмування — навмисно на початку списку (перші сторінки
 # вибору категорій у боті), решта — після них.
 AVAILABLE_CATEGORIES = [
-    "Python", "Java", "C++", "NET", "Front End", "Node.js", "Golang", "Rust",
+    "Python", "Java", "Kotlin", "C++", "NET", "Front End", "Node.js", "Golang", "Rust",
     "AI/ML", "Support", "Architect", "C-level", "Copywriter",
     "Data Engineer", "Data Science", "Design", "DevOps", "Embedded",
     "Engineering Manager", "ERP/CRM", "PHP", "Hardware",
@@ -31,7 +31,7 @@ DOU_CATEGORY_MAP = {
     "Data Engineer": "Data Engineer", "Data Science": "Data Science", "Design": "Design",
     "DevOps": "DevOps", "Embedded": "Embedded", "Engineering Manager": "Engineering Manager",
     "ERP/CRM": "ERP/CRM", "Front End": "Front End", "Golang": "Golang", "Hardware": "Hardware",
-    "Java": "Java", "Marketing": "Marketing", "Node.js": "Node.js", "PHP": "PHP",
+    "Java": "Java", "Kotlin": "Kotlin", "Marketing": "Marketing", "Node.js": "Node.js", "PHP": "PHP",
     "Product Manager": "Product Manager", "Project Manager": "Project Manager",
     "Python": "Python", "QA": "QA", "Rust": "Rust", "SAP": "SAP", "Security": "Security",
     "Support": "Support", "SysAdmin": "SysAdmin", "Technical Writer": "Technical Writer",
@@ -44,7 +44,7 @@ DJINNI_KEYWORD_MAP = {
     "Data Engineer": "data engineer", "Data Science": "data science", "Design": "design",
     "DevOps": "devops", "Embedded": "embedded", "Engineering Manager": "engineering manager",
     "ERP/CRM": "erp", "Front End": "front end", "Golang": "golang", "Hardware": "hardware",
-    "Java": "java", "Marketing": "marketing", "Node.js": "node.js", "PHP": "php",
+    "Java": "java", "Kotlin": "kotlin", "Marketing": "marketing", "Node.js": "node.js", "PHP": "php",
     "Product Manager": "product manager", "Project Manager": "project manager",
     "Python": "python", "QA": "qa", "Rust": "rust", "SAP": "sap", "Security": "security",
     "Support": "support", "SysAdmin": "sysadmin", "Technical Writer": "technical writer",
