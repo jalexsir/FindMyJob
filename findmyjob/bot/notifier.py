@@ -103,11 +103,17 @@ class NotificationDispatcher:
         started = time.monotonic()
 
         semaphore = asyncio.Semaphore(NOTIFY_CONCURRENCY)
+        # Сумарно за прохід — ті самі три цифри, що й у NDA-шкедулері
+        # (nda_notifier.py): скільки підійшло під категорії, скільки лишилось
+        # після звірки з журналом/прихованими, скільки реально пішло в чат.
+        stats = {"matched": 0, "new": 0, "sent": 0}
 
         async def serve(sub: NotificationSub) -> None:
             async with semaphore:
-                batch = self._collect(sub, by_category, context, today)
-                await self._deliver(batch, context, today)
+                batch, matched = self._collect(sub, by_category, context, today)
+                stats["matched"] += matched
+                stats["new"] += len(batch.vacancies)
+                stats["sent"] += await self._deliver(batch, context, today)
 
         results = await asyncio.gather(
             *(serve(sub) for sub in subscriptions.values()), return_exceptions=True
@@ -119,6 +125,11 @@ class NotificationDispatcher:
                     "[СПОВІЩЕННЯ] збій обробки користувача %s: %s", sub.user_id, result
                 )
 
+        logger.info(
+            "[СПОВІЩЕННЯ] підсумок: %d підійшло під категорії підписників, звірено з "
+            "журналом/прихованими — %d нових, фактично розіслано — %d",
+            stats["matched"], stats["new"], stats["sent"],
+        )
         logger.info("[СПОВІЩЕННЯ] прохід завершено за %.1f с", time.monotonic() - started)
 
     async def _fetch_today(self, categories: list[str]) -> dict[str, list[Vacancy]]:
@@ -146,35 +157,44 @@ class NotificationDispatcher:
         by_category: dict[str, list[Vacancy]],
         context: ContextTypes.DEFAULT_TYPE,
         today: str,
-    ) -> UserBatch:
-        """Вибирає для користувача те, чого він ще не бачив сьогодні."""
+    ) -> tuple[UserBatch, int]:
+        """Вибирає для користувача те, чого він ще не бачив сьогодні.
+
+        Друге значення — скільки вакансій узагалі підійшло під його категорії
+        (до звірки з журналом надісланого й прихованими), для підсумкового
+        логу проходу.
+        """
         state = self._states.user(context, sub.user_id)
         hidden = state.hidden
         already_sent = self._states.store.sent_today(sub.user_id, today)
 
+        matched: set[str] = set()
         picked: dict[str, dict] = {}
         for category in sub.categories:
             for vacancy in by_category.get(category, ()):
                 short_link = vacancy.short_link
-                # Одна вакансія може бути в кількох обраних категоріях — dict за
-                # short_link прибирає такі повтори в межах цього ж проходу.
-                if short_link in picked or short_link in hidden or short_link in already_sent:
+                # Одна вакансія може бути в кількох обраних категоріях —
+                # set/dict за short_link прибирає такі повтори в межах проходу.
+                if short_link in matched:
+                    continue
+                matched.add(short_link)
+                if short_link in hidden or short_link in already_sent:
                     continue
                 picked[short_link] = vacancy.to_dict()
 
-        return UserBatch(sub=sub, vacancies=picked)
+        return UserBatch(sub=sub, vacancies=picked), len(matched)
 
     async def _deliver(
         self, batch: UserBatch, context: ContextTypes.DEFAULT_TYPE, today: str
-    ) -> None:
-        """Надсилає картки й одразу записує їх у журнал."""
+    ) -> int:
+        """Надсилає картки й одразу записує їх у журнал. Повертає скільки пішло."""
         sub = batch.sub
         state = self._states.user(context, sub.user_id)
 
         if not batch.vacancies:
             # Мовчимо, якщо нема нових — щогодинне "нічого немає" тільки
             # засмічувало чат, повідомлення й кнопка нікому не були потрібні.
-            return
+            return 0
 
         # Позначаємо кожну картку одразу після надсилання, а не пачку в кінці:
         # якщо Telegram обірве розсилку посередині, доставлені не прийдуть удруге.
@@ -197,9 +217,10 @@ class NotificationDispatcher:
             )
 
         if not sent:
-            return
+            return 0
         logger.info("[СПОВІЩЕННЯ] користувач %s: надіслано %d", sub.user_id, len(sent))
         await self._send_text(context, sub.chat_id, texts.notifications_sent(len(sent)))
+        return len(sent)
 
     @staticmethod
     async def _send_text(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str) -> None:
