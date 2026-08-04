@@ -32,6 +32,10 @@ GENERIC_LEADING_WORDS = {
     "nice", "tools", "sensor & platform",
     "this", "that", "it", "he", "she", "they", "we", "you", "i",
     "надсилайте", "надсилай", "надішли",
+    # Позначки-бейджі військових/бронювальних вакансій ("Спеціаліст",
+    # "Підрозділ", "Бронювання від мобілізації") — не назва компанії, а статус
+    # чи роль, що бува потрапляє в поле компанії замість реальної назви.
+    "спеціаліст", "фахівець", "підрозділ", "бронювання",
 }
 
 # Типові заголовки секцій вакансій та загальні іменники (точний збіг).
@@ -226,6 +230,11 @@ def is_invalid_dou_company(text: str, title: str = "") -> bool:
     # Те саме правило великої літери. Цифри на початку тут особливо важливі:
     # "414 окрема бригада безпілотних систем «Птахи Мадяра»" — валідна назва.
     if _starts_lowercase(candidate):
+        return True
+    # Ті самі бейджі-плейсхолдери, що й для Djinni (GENERIC_LEADING_WORDS) —
+    # довгі офіційні назви військових частин ними не починаються.
+    first_word = candidate.split()[0].lower().strip(_TRIM_CHARS) if candidate.split() else ""
+    if first_word in GENERIC_LEADING_WORDS:
         return True
     if not title:
         return False
