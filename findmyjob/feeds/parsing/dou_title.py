@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .company import is_invalid_dou_company, trim_company_tagline
-from .text import SALARY_RE
+from .text import SALARY_RE, unescape_twice
 
 # Роздільники між посадою та рештою рядка. Порядок не важливий — беремо той,
 # що трапився раніше в рядку.
@@ -26,6 +26,10 @@ DESCRIPTION_MARKERS = (
 
 MAX_CITY_LENGTH = 25
 
+# "Sherlock, recruitment agency, віддалено" — тип найму, а не місто, але
+# потрапляє в той самий хвіст після назви компанії, що й реальна локація.
+_NOT_LOCATION_MARKER = "agency"
+
 
 @dataclass(frozen=True)
 class ParsedTitle:
@@ -38,7 +42,13 @@ class ParsedTitle:
 
 
 def parse_dou_title(raw_title: str) -> ParsedTitle:
-    """Розбирає DOU-заголовок. Якщо роздільника немає — усе вважається посадою."""
+    """Розбирає DOU-заголовок. Якщо роздільника немає — усе вважається посадою.
+
+    `raw_title` іноді приходить двічі екранованим ("R&amp;amp;D" у сирому RSS),
+    тож перш ніж різати рядок на частини, знімаємо екранування — так само, як
+    для описів (`company.py`) і локацій (`location.py`).
+    """
+    raw_title = unescape_twice(raw_title)
     separator_index, separator = _find_first_separator(raw_title)
     if separator_index == -1:
         return ParsedTitle(title=raw_title)
@@ -75,7 +85,7 @@ def parse_dou_title(raw_title: str) -> ParsedTitle:
         title=title,
         company=trim_company_tagline(company),
         salary=salary,
-        location=location,
+        location=_strip_agency_marker(location),
     )
 
 
@@ -125,7 +135,28 @@ def _looks_like_city(candidate: str) -> bool:
         and not SALARY_RE.search(candidate)
         and not candidate.endswith(":")
         and not any(char.isdigit() for char in candidate)
+        # "recruitment agency, віддалено" — тип найму, не місто; без цього
+        # винятку жадібний збір "схожих на місто" частин з кінця захоплює
+        # й його разом із реальною локацією.
+        and _NOT_LOCATION_MARKER not in candidate.lower()
     )
+
+
+def _strip_agency_marker(location: str) -> str:
+    """Вирізає частину-хвіст на кшталт "recruitment agency" з готової локації.
+
+    На відміну від `_looks_like_city` (застосовується лише в
+    `split_company_and_cities`), сюди потрапляє й хвіст, зібраний
+    `_split_leading_parts`/`_salary_and_location` напряму з частин після коми —
+    туди маркер агентства так само може влізти.
+    """
+    if not location or _NOT_LOCATION_MARKER not in location.lower():
+        return location
+    kept = [
+        part for part in (p.strip() for p in location.split(","))
+        if _NOT_LOCATION_MARKER not in part.lower()
+    ]
+    return ", ".join(kept).strip()
 
 
 def _split_leading_parts(parts: list[str]) -> tuple[str, str, str]:
@@ -188,7 +219,8 @@ def _rescue_company(
             continue
         new_salary, new_location = _salary_and_location(parts, salary, location)
         return ParsedTitle(
-            title=title, company=parts[0], salary=new_salary, location=new_location
+            title=title, company=parts[0], salary=new_salary,
+            location=_strip_agency_marker(new_location),
         )
     return None
 
