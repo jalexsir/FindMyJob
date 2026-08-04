@@ -67,17 +67,41 @@ _TITLE_FILTER_WORDS = (
 )
 _TITLE_FILTER_WORDS_LOWER = tuple(word.lower() for word in _TITLE_FILTER_WORDS)
 
+# Виняток: навіть якщо назва пройшла список включення вище, ці слова/фрази
+# ЗАБИРАЮТЬ вакансію зі списку — виняток має пріоритет над включенням.
+# "Staff" і "Monetization" навмисно є в обох списках: самі по собі вони
+# більше не пропускають вакансію.
+_TITLE_EXCLUDE_PHRASES = (
+    "Менеджер з роботи з клієнтами", "Event Manager", "Marketing",
+    "Recruitment", "Brand Manager", "Комунікаційний менеджер",
+    "Monetization", "Staff",
+)
+_TITLE_EXCLUDE_PHRASES_LOWER = tuple(phrase.lower() for phrase in _TITLE_EXCLUDE_PHRASES)
+
 
 def clean_title(text: str) -> str:
     """Прибирає зайві пробіли/переноси в сирому тексті посилання."""
     return collapse_spaces(text)
 
 
+def _is_manager_excluded(lowered_title: str) -> bool:
+    """Будь-яке "Manager"/"менеджер" — виняток, КРІМ "Project Manager" і
+    "Product Manager" (лишень англійські написання мають цей виняток)."""
+    has_manager = "manager" in lowered_title or "менеджер" in lowered_title
+    if not has_manager:
+        return False
+    return not ("project manager" in lowered_title or "product manager" in lowered_title)
+
+
 def _matches_title_filter(title: str) -> bool:
-    """True, щойно назва містить перше-ліпше слово зі списку — решту слів для
-    цієї вакансії вже не перевіряємо (`any()` коротко замикається)."""
+    """True, якщо вакансію показуємо: назва містить слово зі списку
+    включення І не підпадає під жоден зі списку винятків."""
     lowered = title.lower()
-    return any(word in lowered for word in _TITLE_FILTER_WORDS_LOWER)
+    if not any(word in lowered for word in _TITLE_FILTER_WORDS_LOWER):
+        return False
+    if any(phrase in lowered for phrase in _TITLE_EXCLUDE_PHRASES_LOWER):
+        return False
+    return not _is_manager_excluded(lowered)
 
 
 def _fetch_nda_vacancies() -> list[Vacancy]:
