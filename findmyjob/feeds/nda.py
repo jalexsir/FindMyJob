@@ -40,10 +40,44 @@ NDA_CACHE_TTL_SECONDS = 120
 # варіанти на випадок, якщо сайт колись віддаватиме кореневі шляхи.
 _VACANCY_HREF_RE = re.compile(r"^\.?/vacancy/")
 
+# Вакансія лишається, лише якщо її назва містить хоча б одне з цих слів
+# (без урахування регістру) — фільтр застосовується до дедупу. Порядок у
+# списку значення не має: перевіряється "чи є будь-яке з них", а не
+# пріоритет одного слова над іншим.
+_TITLE_FILTER_WORDS = (
+    "System", "Administrator", "Data", "Engineer", "C++", "Python", "Backend",
+    "ArduPilot", "SDR", "DevOps", "Reverse", "Support", "Computer", "Vision",
+    "SLAM", "VIO", "Autonomous", "Systems", "Robotics", "Simulation", "Embedded",
+    "Firmware", "Developer", "Hardware", "Technical", "Lead", "Electronics",
+    "Component", "QA", "Analyst", "Quality", "Radio", "Frequency", "RF",
+    "Measurement", "Antenna", "Link", "Integration", "Mechanical", "DFA",
+    "Industrial", "Release", "Altium", "Designer", "PCB", "PCBA", "APQP",
+    "FMEA", "Design", "Risk", "Assembler", "CNC", "UAV", "UGV", "Test",
+    "Pilot", "Project", "Manager", "Delivery", "Product", "Owner", "Functional",
+    "Chief", "Staff", "Monetization", "Senior", "Copywriter", "Content",
+    "Writer", "OSINT", "Технік", "програміст", "Тестування", "електроніки",
+    "Інженер", "інтеграції", "систем", "зв’язку", "Відеопередача",
+    "конструктор", "CAD-інженер", "Системний", "інтегратор", "якості",
+    "NPI", "Композитні", "матеріали", "технолог", "Машинобудування",
+    "Електромеханік", "Оператор", "ЧПК", "Ремонт", "обладнання", "АСУ",
+    "3D-принтери", "ремонту", "електроінструменту", "Моторист",
+    "Механік-випробувач", "Механік-прототипувальник", "експлуатаційної",
+    "документації", "Технічний", "редактор", "Менеджер", "розвитку",
+    "бізнесу", "Грантовий", "ЗЕД", "роботи", "клієнтами", "OSINT-аналітик",
+)
+_TITLE_FILTER_WORDS_LOWER = tuple(word.lower() for word in _TITLE_FILTER_WORDS)
+
 
 def clean_title(text: str) -> str:
     """Прибирає зайві пробіли/переноси в сирому тексті посилання."""
     return collapse_spaces(text)
+
+
+def _matches_title_filter(title: str) -> bool:
+    """True, щойно назва містить перше-ліпше слово зі списку — решту слів для
+    цієї вакансії вже не перевіряємо (`any()` коротко замикається)."""
+    lowered = title.lower()
+    return any(word in lowered for word in _TITLE_FILTER_WORDS_LOWER)
 
 
 def _fetch_nda_vacancies() -> list[Vacancy]:
@@ -61,7 +95,7 @@ def _fetch_nda_vacancies() -> list[Vacancy]:
     soup = BeautifulSoup(response.content, "html.parser")
     links = soup.find_all("a", href=_VACANCY_HREF_RE)
 
-    raw: list[Vacancy] = []
+    candidates: list[Vacancy] = []
     for a in links:
         href = a.get("href")
         if not href:
@@ -78,7 +112,7 @@ def _fetch_nda_vacancies() -> list[Vacancy]:
         title = clean_title(raw_title)
         if not title:
             continue
-        raw.append(Vacancy(
+        candidates.append(Vacancy(
             source=NDA_SOURCE_NAME,
             title=title,
             # urljoin, а не конкатенація рядків: href відносний ("./vacancy/x"),
@@ -87,19 +121,27 @@ def _fetch_nda_vacancies() -> list[Vacancy]:
             category=NDA_CATEGORY,
         ))
 
+    # Фільтр за словами в назві — ДО дедупу (щоб не дублювати роботу над
+    # вакансіями, які все одно будуть відкинуті).
+    filtered = [v for v in candidates if _matches_title_filter(v.title)]
+
+    # primary=[] навмисно: дедуп потрібен ВСЕРЕДИНІ єдиного списку (кілька
+    # <a> можуть вести на ту саму вакансію), а merge_by_link дедуплікує саме
+    # secondary — і між собою, і проти primary.
+    result = merge_by_link(NDA_CATEGORY, [], filtered).vacancies
+
     # Лог завжди (не лише при помилці): 200 OK з 0 знайдених посилань — це не
     # виняток requests, і без цього рядка діагностувати "чому порожньо" можна
     # тільки наосліп. HTTP-статус і розмір тіла показують, чи сайт узагалі
     # віддав очікувану сторінку (а не, наприклад, чужу заглушку/капчу).
     logger.info(
-        "[NDA] %s → %d, %d байт, знайдено %d посилань /vacancy/, %d вакансій після дедупу",
-        NDA_URL, response.status_code, len(response.content), len(links), len(raw),
+        "[NDA] %s → %d, %d байт, знайдено %d посилань /vacancy/, %d пройшли фільтр "
+        "слів (%d відсіяно), %d вакансій після дедупу",
+        NDA_URL, response.status_code, len(response.content), len(links),
+        len(filtered), len(candidates) - len(filtered), len(result),
     )
 
-    # primary=[] навмисно: дедуп потрібен ВСЕРЕДИНІ єдиного списку (кілька
-    # <a> можуть вести на ту саму вакансію), а merge_by_link дедуплікує саме
-    # secondary — і між собою, і проти primary.
-    return merge_by_link(NDA_CATEGORY, [], raw).vacancies
+    return result
 
 
 class _NdaCache:
