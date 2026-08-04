@@ -346,6 +346,35 @@ class VacancyStore:
             ).fetchall()
         return [row[0] for row in rows]
 
+    def backfill_known_users_from_chat_state(self) -> int:
+        """Одноразове наповнення known_users історичними даними з chat_state.
+
+        known_users з'явилась пізніше за chat_state, тож на вже працюючому
+        боті вона порожня, хоча користувачі є вже давно. chat_state
+        (chat_id, start_message_id) існує з самого початку й отримує рядок
+        на кожен /start — а чат тут завжди приватний, один на юзера, тож
+        chat_id чисельно збігається з user_id. Спрацьовує лише коли
+        known_users справді порожня (перевірка й вставка — в одній
+        транзакції), інакше — no-op: подальші user_id додає register_user().
+        Повертає кількість перенесених user_id.
+        """
+        with self._connect() as conn:
+            (count,) = conn.execute(f"SELECT COUNT(*) FROM {_TABLE_KNOWN_USERS}").fetchone()
+            if count:
+                return 0
+            rows = conn.execute(
+                f"SELECT chat_id FROM {_TABLE_CHAT_STATE} WHERE start_message_id IS NOT NULL"
+            ).fetchall()
+            if not rows:
+                return 0
+            now = datetime.now().isoformat()
+            conn.executemany(
+                f"INSERT OR IGNORE INTO {_TABLE_KNOWN_USERS} (user_id, first_seen) "
+                f"VALUES (?, ?)",
+                [(chat_id, now) for (chat_id,) in rows],
+            )
+            return len(rows)
+
     # ── Внутрішні деталі ─────────────────────────────────────────────────────
 
     def _connect(self) -> sqlite3.Connection:
