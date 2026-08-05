@@ -110,7 +110,7 @@ class NotificationDispatcher:
 
         async def serve(sub: NotificationSub) -> None:
             async with semaphore:
-                batch, matched = self._collect(sub, by_category, context, today)
+                batch, matched, hidden_count = self._collect(sub, by_category, context, today)
                 sent = await self._deliver(batch, context, today)
                 stats["matched"] += matched
                 stats["new"] += len(batch.vacancies)
@@ -119,8 +119,10 @@ class NotificationDispatcher:
                 # того, чи було що слати — інакше з логів не видно, хто взагалі
                 # в проході брав участь, а хто мовчки випав (напр. 0 нових).
                 logger.info(
-                    "[СПОВІЩЕННЯ] користувач %s: %d підійшло, %d нових, %d розіслано",
-                    sub.user_id, matched, len(batch.vacancies), sent,
+                    "[СПОВІЩЕННЯ] користувач %s: %d категорій, %d підійшло, "
+                    "%d прихованих, %d нових, %d розіслано",
+                    sub.user_id, len(sub.categories), matched, hidden_count,
+                    len(batch.vacancies), sent,
                 )
 
         results = await asyncio.gather(
@@ -165,18 +167,20 @@ class NotificationDispatcher:
         by_category: dict[str, list[Vacancy]],
         context: ContextTypes.DEFAULT_TYPE,
         today: str,
-    ) -> tuple[UserBatch, int]:
+    ) -> tuple[UserBatch, int, int]:
         """Вибирає для користувача те, чого він ще не бачив сьогодні.
 
         Друге значення — скільки вакансій узагалі підійшло під його категорії
-        (до звірки з журналом надісланого й прихованими), для підсумкового
-        логу проходу.
+        (до звірки з журналом надісланого й прихованими). Третє — скільки з
+        них відсіяно саме як приховані (без урахування вже надісланих) — для
+        per-user логу проходу.
         """
         state = self._states.user(context, sub.user_id)
         hidden = state.hidden
         already_sent = self._states.store.sent_today(sub.user_id, today)
 
         matched: set[str] = set()
+        hidden_count = 0
         picked: dict[str, dict] = {}
         for category in sub.categories:
             for vacancy in by_category.get(category, ()):
@@ -186,11 +190,14 @@ class NotificationDispatcher:
                 if short_link in matched:
                     continue
                 matched.add(short_link)
-                if short_link in hidden or short_link in already_sent:
+                if short_link in hidden:
+                    hidden_count += 1
+                    continue
+                if short_link in already_sent:
                     continue
                 picked[short_link] = vacancy.to_dict()
 
-        return UserBatch(sub=sub, vacancies=picked), len(matched)
+        return UserBatch(sub=sub, vacancies=picked), len(matched), hidden_count
 
     async def _deliver(
         self, batch: UserBatch, context: ContextTypes.DEFAULT_TYPE, today: str

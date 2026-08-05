@@ -79,7 +79,10 @@ class NdaNotificationDispatcher:
             # Один рядок на КОЖНОГО підписника навіть тут — інакше з логів не
             # видно, хто взагалі в шкедулері бере участь, коли діффу немає.
             for sub in subscribers:
-                logger.info("[NDA-СПОВІЩЕННЯ] користувач %s: 0 нових, 0 розіслано", sub.user_id)
+                logger.info(
+                    "[NDA-СПОВІЩЕННЯ] користувач %s: %d категорій, 0 нових, 0 розіслано",
+                    sub.user_id, len(sub.categories),
+                )
             logger.info(
                 "[NDA-СПОВІЩЕННЯ] прохід завершено за %.1f с — нових немає, нікому не шлемо",
                 time.monotonic() - started,
@@ -128,8 +131,8 @@ class NdaNotificationDispatcher:
         # Один рядок на КОЖНОГО підписника, незалежно від результату —
         # інакше з логів не видно, хто взагалі брав участь у проході.
         logger.info(
-            "[NDA-СПОВІЩЕННЯ] користувач %s: %d нових, %d розіслано",
-            sub.user_id, len(payload), sent,
+            "[NDA-СПОВІЩЕННЯ] користувач %s: %d категорій, %d нових, %d розіслано",
+            sub.user_id, len(sub.categories), len(payload), sent,
         )
 
         if not sent:
