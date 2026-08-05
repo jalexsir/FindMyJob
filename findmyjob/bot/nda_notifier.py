@@ -76,6 +76,10 @@ class NdaNotificationDispatcher:
         )
 
         if not diff:
+            # Один рядок на КОЖНОГО підписника навіть тут — інакше з логів не
+            # видно, хто взагалі в шкедулері бере участь, коли діффу немає.
+            for sub in subscribers:
+                logger.info("[NDA-СПОВІЩЕННЯ] користувач %s: 0 нових, 0 розіслано", sub.user_id)
             logger.info(
                 "[NDA-СПОВІЩЕННЯ] прохід завершено за %.1f с — нових немає, нікому не шлемо",
                 time.monotonic() - started,
@@ -121,9 +125,15 @@ class NdaNotificationDispatcher:
                 sub.user_id, sent, len(payload), exc,
             )
 
+        # Один рядок на КОЖНОГО підписника, незалежно від результату —
+        # інакше з логів не видно, хто взагалі брав участь у проході.
+        logger.info(
+            "[NDA-СПОВІЩЕННЯ] користувач %s: %d нових, %d розіслано",
+            sub.user_id, len(payload), sent,
+        )
+
         if not sent:
             return
-        logger.info("[NDA-СПОВІЩЕННЯ] користувач %s: надіслано %d", sub.user_id, sent)
         try:
             await context.bot.send_message(
                 sub.chat_id,

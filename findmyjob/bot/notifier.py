@@ -111,9 +111,17 @@ class NotificationDispatcher:
         async def serve(sub: NotificationSub) -> None:
             async with semaphore:
                 batch, matched = self._collect(sub, by_category, context, today)
+                sent = await self._deliver(batch, context, today)
                 stats["matched"] += matched
                 stats["new"] += len(batch.vacancies)
-                stats["sent"] += await self._deliver(batch, context, today)
+                stats["sent"] += sent
+                # Один рядок на КОЖНОГО підписника шкедулера, незалежно від
+                # того, чи було що слати — інакше з логів не видно, хто взагалі
+                # в проході брав участь, а хто мовчки випав (напр. 0 нових).
+                logger.info(
+                    "[СПОВІЩЕННЯ] користувач %s: %d підійшло, %d нових, %d розіслано",
+                    sub.user_id, matched, len(batch.vacancies), sent,
+                )
 
         results = await asyncio.gather(
             *(serve(sub) for sub in subscriptions.values()), return_exceptions=True
@@ -218,7 +226,8 @@ class NotificationDispatcher:
 
         if not sent:
             return 0
-        logger.info("[СПОВІЩЕННЯ] користувач %s: надіслано %d", sub.user_id, len(sent))
+        # Підсумковий рядок на юзера пише serve() (один раз, з повним набором
+        # цифр — підійшло/нових/розіслано) — тут дублювати не треба.
         await self._send_text(context, sub.chat_id, texts.notifications_sent(len(sent)))
         return len(sent)
 
