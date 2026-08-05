@@ -76,6 +76,13 @@ class NdaNotificationDispatcher:
         )
 
         if not diff:
+            # Один рядок на КОЖНОГО підписника навіть тут — інакше з логів не
+            # видно, хто взагалі в шкедулері бере участь, коли діффу немає.
+            for sub in subscribers:
+                logger.info(
+                    "[NDA-СПОВІЩЕННЯ] user-%s: %d категорій, 0 нових, 0 розіслано",
+                    sub.user_id, len(sub.categories),
+                )
             logger.info(
                 "[NDA-СПОВІЩЕННЯ] прохід завершено за %.1f с — нових немає, нікому не шлемо",
                 time.monotonic() - started,
@@ -95,7 +102,7 @@ class NdaNotificationDispatcher:
         for sub, result in zip(subscribers, results):
             if isinstance(result, BaseException):
                 logger.warning(
-                    "[NDA-СПОВІЩЕННЯ] збій обробки користувача %s: %s", sub.user_id, result
+                    "[NDA-СПОВІЩЕННЯ] збій обробки user-%s: %s", sub.user_id, result
                 )
 
         logger.info("[NDA-СПОВІЩЕННЯ] прохід завершено за %.1f с", time.monotonic() - started)
@@ -117,13 +124,19 @@ class NdaNotificationDispatcher:
         except Exception as exc:
             # Заблокований бот або закритий чат не має валити розсилку решті.
             logger.warning(
-                "[NDA-СПОВІЩЕННЯ] користувач %s: обірвалось на %d з %d — %s",
+                "[NDA-СПОВІЩЕННЯ] user-%s: обірвалось на %d з %d — %s",
                 sub.user_id, sent, len(payload), exc,
             )
 
+        # Один рядок на КОЖНОГО підписника, незалежно від результату —
+        # інакше з логів не видно, хто взагалі брав участь у проході.
+        logger.info(
+            "[NDA-СПОВІЩЕННЯ] user-%s: %d категорій, %d нових, %d розіслано",
+            sub.user_id, len(sub.categories), len(payload), sent,
+        )
+
         if not sent:
             return
-        logger.info("[NDA-СПОВІЩЕННЯ] користувач %s: надіслано %d", sub.user_id, sent)
         try:
             await context.bot.send_message(
                 sub.chat_id,
