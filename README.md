@@ -1413,13 +1413,28 @@ Alloy** ставиться на VPS одним пакетом як звичай�
    `/etc/alloy/config.alloy`, перевір `systemctl cat alloy`, якщо
    відрізняється) і `deploy/alloy.env.example` → env-файл юніта alloy
    (шлях так само видно в `systemctl cat alloy`) із реальними значеннями.
-4. `sudo systemctl restart alloy` — логи findmyjob-bot підуть у Grafana
-   Cloud; сам конфіг фільтрує журнал за `_SYSTEMD_UNIT=findmyjob-bot.service`,
-   тож інші процеси сервера в Loki не потрапляють.
+4. Поставити жорсткий стелю ресурсів (мета — мінімально навантажити VPS):
+   скопіювати `deploy/alloy-override.conf` у
+   `/etc/systemd/system/alloy.service.d/override.conf` (каталог створити,
+   якщо його ще немає) — `MemoryHigh=64M`, `MemoryMax=128M`, `CPUQuota=10%`.
+   Це drop-in, він лише доповнює базовий юніт пакета, не замінює його.
+5. `sudo systemctl daemon-reload && sudo systemctl restart alloy` — логи
+   findmyjob-bot підуть у Grafana Cloud; сам конфіг фільтрує журнал за
+   `_SYSTEMD_UNIT=findmyjob-bot.service`, тож інші процеси сервера в Loki
+   не потрапляють.
+
+> **Якщо після рестарту логів у Grafana Cloud немає:** перевір, що в
+> journald увімкнено персистентне зберігання (`Storage=persistent` у
+> `/etc/systemd/journald.conf`, потім `sudo systemctl restart
+> systemd-journald`) — на деяких мінімальних образах за замовчуванням
+> журнал лише в пам'яті (`/run/log/journal`), і шляху `/var/log/journal` з
+> конфіга просто не існує.
 
 Опційно в `alloy-config.alloy` є закоментований блок системних метрик
 (CPU/RAM/диск) — той самий Alloy-процес вміє те, що окремий
-`node_exporter`, без встановлення другого бінарника.
+`node_exporter`, без встановлення другого бінарника. Лишається вимкненим
+за замовчуванням саме заради мінімального навантаження — вмикай, лише якщо
+дійсно потрібне здоров'я сервера, а не тільки логи бота.
 
 `deploy/alloy.env` (реальні значення) у `.gitignore` так само, як `.env`
 бота — секрети Grafana Cloud у репозиторій не потрапляють.
