@@ -1413,22 +1413,46 @@ Alloy** ставиться на VPS одним пакетом як звичай�
    `/etc/alloy/config.alloy`, перевір `systemctl cat alloy`, якщо
    відрізняється) і `deploy/alloy.env.example` → env-файл юніта alloy
    (шлях так само видно в `systemctl cat alloy`) із реальними значеннями.
+   При встановленні пакета dpkg може запитати, чи лишити наявний
+   `/etc/default/alloy` — обирай **N** (лишити свій, із твоїми `LOKI_*`).
 4. Поставити жорсткий стелю ресурсів (мета — мінімально навантажити VPS):
    скопіювати `deploy/alloy-override.conf` у
    `/etc/systemd/system/alloy.service.d/override.conf` (каталог створити,
-   якщо його ще немає) — `MemoryHigh=64M`, `MemoryMax=128M`, `CPUQuota=10%`.
-   Це drop-in, він лише доповнює базовий юніт пакета, не замінює його.
+   якщо його ще немає) — `MemoryHigh=128M`, `MemoryMax=256M`, `CPUQuota=10%`
+   (заміряно на реальному сервері: сам процес Alloy важить ~64М одразу
+   після старту навіть у мінімальній конфігурації, тож менший ліміт означав
+   би постійний throttling без користі). Це drop-in, він лише доповнює
+   базовий юніт пакета, не замінює його.
 5. `sudo systemctl daemon-reload && sudo systemctl restart alloy` — логи
    findmyjob-bot підуть у Grafana Cloud; сам конфіг фільтрує журнал за
    `_SYSTEMD_UNIT=findmyjob-bot.service`, тож інші процеси сервера в Loki
    не потрапляють.
 
-> **Якщо після рестарту логів у Grafana Cloud немає:** перевір, що в
-> journald увімкнено персистентне зберігання (`Storage=persistent` у
-> `/etc/systemd/journald.conf`, потім `sudo systemctl restart
-> systemd-journald`) — на деяких мінімальних образах за замовчуванням
-> журнал лише в пам'яті (`/run/log/journal`), і шляху `/var/log/journal` з
-> конфіга просто не існує.
+> **Якщо `alloy.service` падає одразу після старту** з помилкою `Error:
+> accepts 1 arg(s), received 0` і йде в нескінченний рестарт-цикл —
+> `ExecStart` пакета читає з env-файлу змінні `CONFIG_FILE` і
+> `CUSTOM_ARGS` (`systemctl cat alloy | grep ExecStart` покаже точний
+> рядок команди), а наш `alloy.env.example` спершу їх не визначав. Якщо на
+> кроці 3 обрав "лишити свій" `/etc/default/alloy` і в ньому лише
+> `LOKI_*` — деструктивно втратив ці дві змінні пакета. Виправлення (уже в
+> актуальному `alloy.env.example`, якщо ставиш заново):
+> ```
+> CONFIG_FILE="/etc/alloy/config.alloy"
+> CUSTOM_ARGS=""
+> RESTART_ON_UPGRADE=true
+> ```
+> Значення для звірки лежать у `/etc/default/alloy.dpkg-dist` (резервна
+> копія оригіналу пакета, яку dpkg лишає поруч, коли обираєш "N").
+
+> **Якщо сервіс стабільно `active (running)`, але логів у Grafana Cloud
+> усе одно немає:** перевір, що в journald увімкнено персистентне
+> зберігання (`Storage=persistent` у `/etc/systemd/journald.conf`, потім
+> `sudo systemctl restart systemd-journald`) — на деяких мінімальних
+> образах за замовчуванням журнал лише в пам'яті (`/run/log/journal`), і
+> шляху `/var/log/journal` з конфіга просто не існує. Права на сам journal
+> теж варто звірити (`ls -la /var/log/journal/*/` — читання лише для
+> `root` і групи `systemd-journal`; юзер, під яким працює alloy, має бути
+> в цій групі: `systemctl show alloy -p User` → `groups <user>`).
 
 Опційно в `alloy-config.alloy` є закоментований блок системних метрик
 (CPU/RAM/диск) — той самий Alloy-процес вміє те, що окремий
