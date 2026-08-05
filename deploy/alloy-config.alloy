@@ -1,0 +1,57 @@
+// Grafana Alloy — пересилання логів findmyjob-bot у Grafana Cloud (Loki).
+//
+// Один процес, без Docker: офіційний .deb/.rpm пакет Alloy ставить його як
+// звичайний systemd-сервіс поруч із findmyjob-bot. Цей файл кладеться в
+// /etc/alloy/config.alloy на сервері (шлях залежить від дистрибутиву —
+// перевір `systemctl cat alloy`, якщо відрізняється).
+//
+// Значення LOKI_URL / LOKI_USERNAME / LOKI_PASSWORD (і за потреби
+// PROMETHEUS_URL / PROMETHEUS_USERNAME / PROMETHEUS_PASSWORD) реальний
+// секрет НЕ тут — вони підставляються з environment-файлу systemd-юніта
+// alloy (аналог .env для бота), який у git не потрапляє. Приклад — поруч,
+// deploy/alloy.env.example.
+
+// ── Логи: лише журнал юніта findmyjob-bot ───────────────────────────────────
+loki.source.journal "findmyjob" {
+  path       = "/var/log/journal"
+  matches    = "_SYSTEMD_UNIT=findmyjob-bot.service"
+  forward_to = [loki.write.grafana_cloud.receiver]
+
+  labels = {
+    job = "findmyjob-bot",
+  }
+}
+
+loki.write "grafana_cloud" {
+  endpoint {
+    url = env("LOKI_URL")
+
+    basic_auth {
+      username = env("LOKI_USERNAME")
+      password = env("LOKI_PASSWORD")
+    }
+  }
+}
+
+// ── Метрики сервера (CPU/RAM/диск) — опційно ────────────────────────────────
+// Alloy вміє те саме, що окремий node_exporter, без встановлення другого
+// бінарника. Розкоментуй разом із PROMETHEUS_* змінними в env-файлі, якщо
+// потрібне здоров'я самого VPS, а не лише логи бота.
+//
+// prometheus.exporter.unix "server" { }
+//
+// prometheus.scrape "server" {
+//   targets    = prometheus.exporter.unix.server.targets
+//   forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+// }
+//
+// prometheus.remote_write "grafana_cloud" {
+//   endpoint {
+//     url = env("PROMETHEUS_URL")
+//
+//     basic_auth {
+//       username = env("PROMETHEUS_USERNAME")
+//       password = env("PROMETHEUS_PASSWORD")
+//     }
+//   }
+// }

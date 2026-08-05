@@ -1394,6 +1394,51 @@ journalctl -u findmyjob-bot -f
 > `.env` і `bot_storage.db` у `.gitignore` — токен і персональні дані
 > користувачів у репозиторій не потрапляють.
 
+### Моніторинг логів (опційно) — Grafana Cloud
+
+Бот пише структуровані рядки (`[СПОВІЩЕННЯ]`, `[NDA-СПОВІЩЕННЯ]`,
+`[КОРИСТУВАЧІ]`) у journald, тож замість постійного `journalctl -f` на
+сервері їх можна пересилати в **Grafana Cloud** (безкоштовний тариф) і
+шукати/будувати дашборди й алерти в браузері. Без Docker — **Grafana
+Alloy** ставиться на VPS одним пакетом як звичайний systemd-сервіс:
+
+1. Зареєструватись на [grafana.com](https://grafana.com) → створити
+   безкоштовний стек. У розділі Loki → "Send logs" знайдеш `LOKI_URL` і
+   `LOKI_USERNAME` (instance ID), там же створюється API-токен
+   (`LOKI_PASSWORD`).
+2. На сервері встановити Alloy за офіційною інструкцією
+   [grafana.com/docs/alloy](https://grafana.com/docs/alloy) (для Ubuntu —
+   `.deb`-репозиторій; сам процес легкий, кілька МБ пам'яті в простої).
+3. Скопіювати `deploy/alloy-config.alloy` у конфіг-шлях Alloy (типово
+   `/etc/alloy/config.alloy`, перевір `systemctl cat alloy`, якщо
+   відрізняється) і `deploy/alloy.env.example` → env-файл юніта alloy
+   (шлях так само видно в `systemctl cat alloy`) із реальними значеннями.
+4. Поставити жорсткий стелю ресурсів (мета — мінімально навантажити VPS):
+   скопіювати `deploy/alloy-override.conf` у
+   `/etc/systemd/system/alloy.service.d/override.conf` (каталог створити,
+   якщо його ще немає) — `MemoryHigh=64M`, `MemoryMax=128M`, `CPUQuota=10%`.
+   Це drop-in, він лише доповнює базовий юніт пакета, не замінює його.
+5. `sudo systemctl daemon-reload && sudo systemctl restart alloy` — логи
+   findmyjob-bot підуть у Grafana Cloud; сам конфіг фільтрує журнал за
+   `_SYSTEMD_UNIT=findmyjob-bot.service`, тож інші процеси сервера в Loki
+   не потрапляють.
+
+> **Якщо після рестарту логів у Grafana Cloud немає:** перевір, що в
+> journald увімкнено персистентне зберігання (`Storage=persistent` у
+> `/etc/systemd/journald.conf`, потім `sudo systemctl restart
+> systemd-journald`) — на деяких мінімальних образах за замовчуванням
+> журнал лише в пам'яті (`/run/log/journal`), і шляху `/var/log/journal` з
+> конфіга просто не існує.
+
+Опційно в `alloy-config.alloy` є закоментований блок системних метрик
+(CPU/RAM/диск) — той самий Alloy-процес вміє те, що окремий
+`node_exporter`, без встановлення другого бінарника. Лишається вимкненим
+за замовчуванням саме заради мінімального навантаження — вмикай, лише якщо
+дійсно потрібне здоров'я сервера, а не тільки логи бота.
+
+`deploy/alloy.env` (реальні значення) у `.gitignore` так само, як `.env`
+бота — секрети Grafana Cloud у репозиторій не потрапляють.
+
 ---
 
 ## Плани розвитку
