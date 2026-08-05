@@ -119,7 +119,7 @@ class NotificationDispatcher:
                 # того, чи було що слати — інакше з логів не видно, хто взагалі
                 # в проході брав участь, а хто мовчки випав (напр. 0 нових).
                 logger.info(
-                    "[СПОВІЩЕННЯ] користувач %s: %d категорій, %d підійшло, "
+                    "[СПОВІЩЕННЯ] user-%s: %d категорій, %d підійшло, "
                     "%d прихованих, %d нових, %d розіслано",
                     sub.user_id, len(sub.categories), matched, hidden_count,
                     len(batch.vacancies), sent,
@@ -132,7 +132,7 @@ class NotificationDispatcher:
         for sub, result in zip(subscriptions.values(), results):
             if isinstance(result, BaseException):
                 logger.warning(
-                    "[СПОВІЩЕННЯ] збій обробки користувача %s: %s", sub.user_id, result
+                    "[СПОВІЩЕННЯ] збій обробки user-%s: %s", sub.user_id, result
                 )
 
         logger.info(
@@ -227,7 +227,7 @@ class NotificationDispatcher:
         except Exception as exc:
             # Заблокований бот або закритий чат не має валити розсилку решті.
             logger.warning(
-                "[СПОВІЩЕННЯ] користувач %s: обірвалось на %d з %d — %s",
+                "[СПОВІЩЕННЯ] user-%s: обірвалось на %d з %d — %s",
                 sub.user_id, len(sent), len(batch.vacancies), exc,
             )
 
