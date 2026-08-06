@@ -1,4 +1,5 @@
-"""Генерація картки вакансії (Minecraft-стиль: темний блок із золотою рамкою)."""
+"""Генерація картки вакансії (бренд-стиль FIND MY JOB: чорний фон, жовті
+пігулки-плашки, білий жирний текст, синьо-жовтий прапор-акцент)."""
 
 from __future__ import annotations
 
@@ -11,14 +12,26 @@ from PIL import Image, ImageDraw, ImageFont
 CANVAS_WIDTH, CANVAS_HEIGHT = 800, 300
 WRAP_WIDTH = 26
 INNER_PADDING = 12
+# Невелике заокруглення кутів рамки — суто косметика, тому не пов'язане з
+# INNER_PADDING (той рахує місце під текст, а не форму самої рамки).
+FRAME_CORNER_RADIUS = 16
+# Однаковий відступ фону пігулки від країв тексту з усіх боків — спільний
+# для всіх трьох плашок (номер, NEW, обране), щоб виглядали одним стилем.
+PILL_PADDING_X = 12
+PILL_PADDING_Y = 6
+# Прапор-акцент зліва від номера вакансії — той самий мотив, що й у логотипі
+# FIND MY JOB (вертикальна синьо-жовта смуга перед текстом).
+FLAG_BAR_WIDTH = 8
+FLAG_BAR_GAP = 8
 
-# ── Палітра ───────────────────────────────────────────────────────────────────
-BACKGROUND = (15, 15, 45)
-GOLD = (255, 215, 0)
+# ── Палітра (виміряно з референсного логотипу) ────────────────────────────────
+BACKGROUND = (0, 0, 0)
+YELLOW = (249, 219, 80)
 WHITE = (255, 255, 255)
-TEXT_SHADOW = (80, 40, 0)
-BADGE_FILL = (200, 30, 30)
-BADGE_OUTLINE = (255, 80, 80)
+BLACK = (0, 0, 0)
+FLAG_BLUE = (65, 125, 210)
+BADGE_NEW_FILL = (200, 30, 30)
+BADGE_NEW_OUTLINE = (255, 80, 80)
 
 # ── Розміри шрифтів ───────────────────────────────────────────────────────────
 FONT_SIZE_NUMBER = 26
@@ -69,7 +82,7 @@ class VacancyImageRenderer:
         is_new: bool = False,
         is_favorite: bool = False,
     ) -> io.BytesIO:
-        """Картинка фіксованого розміру: темний блок із золотою рамкою на весь канвас."""
+        """Картинка фіксованого розміру: чорний блок із жовтою рамкою на весь канвас."""
         wrapped = textwrap.fill(title, width=WRAP_WIDTH)
         title_width, title_height = self._measure_title(wrapped)
 
@@ -80,31 +93,24 @@ class VacancyImageRenderer:
         draw = ImageDraw.Draw(image, "RGBA")
         right, bottom = width - 1, height - 1
 
-        draw.rectangle([0, 0, right, bottom], outline=GOLD, width=3)
+        draw.rounded_rectangle(
+            [0, 0, right, bottom], radius=FRAME_CORNER_RADIUS, outline=YELLOW, width=3
+        )
 
         if num:
-            self._draw_shadowed_text(
-                draw, f"Вакансія #{num}",
-                INNER_PADDING, INNER_PADDING, self._font_number, GOLD,
-            )
+            self._draw_number_badge(draw, num)
         if is_new:
             self._draw_new_badge(draw, right)
 
-        # Назва — по центру всього канвасу
-        self._draw_shadowed_text(
-            draw, wrapped,
-            (width - title_width) // 2, (height - title_height) // 2,
-            self._font_title, WHITE,
+        # Назва — по центру всього канвасу, плоским білим жирним текстом
+        # (без тіні — так само, як у референсному логотипі).
+        draw.text(
+            ((width - title_width) // 2, (height - title_height) // 2),
+            wrapped, font=self._font_title, fill=WHITE, align="center",
         )
 
         if is_favorite:
-            box = draw.textbbox((0, 0), BADGE_FAVORITE, font=self._font_favorite)
-            badge_height = box[3] - box[1]
-            self._draw_shadowed_text(
-                draw, BADGE_FAVORITE,
-                INNER_PADDING, bottom - badge_height - INNER_PADDING,
-                self._font_favorite, GOLD,
-            )
+            self._draw_favorite_badge(draw, bottom)
 
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")
@@ -121,10 +127,12 @@ class VacancyImageRenderer:
     def _content_height(self, title_height: int, num: int, is_new: bool, is_favorite: bool) -> int:
         """Мінімальна висота, за якої вміст точно поміститься в рамку."""
         draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-        number_height = draw.textbbox((0, 0), "Вакансія #99", font=self._font_number)[3] if num else 0
-        new_height = draw.textbbox((0, 0), BADGE_NEW, font=self._font_new)[3] if is_new else 0
+        number_height = (
+            self._pill_height(draw, "Вакансія #99", self._font_number) if num else 0
+        )
+        new_height = self._pill_height(draw, BADGE_NEW, self._font_new) if is_new else 0
         favorite_height = (
-            draw.textbbox((0, 0), BADGE_FAVORITE, font=self._font_favorite)[3] if is_favorite else 0
+            self._pill_height(draw, BADGE_FAVORITE, self._font_favorite) if is_favorite else 0
         )
 
         top_row = max(number_height, new_height) if (num or is_new) else 0
@@ -135,24 +143,79 @@ class VacancyImageRenderer:
         )
         return content + INNER_PADDING * 2
 
+    @staticmethod
+    def _pill_height(draw: ImageDraw.ImageDraw, text: str, font) -> int:
+        box = draw.textbbox((0, 0), text, font=font)
+        return (box[3] - box[1]) + PILL_PADDING_Y * 2
+
+    def _draw_number_badge(self, draw: ImageDraw.ImageDraw, num: int) -> None:
+        """Жовта пігулка "Вакансія #N" у лівому верхньому куті, з прапором-
+        акцентом зліва (той самий мотив, що й у логотипі FIND MY JOB)."""
+        text = f"Вакансія #{num}"
+        _, height = self._draw_pill(
+            draw, text, self._font_number,
+            x=INNER_PADDING + FLAG_BAR_WIDTH + FLAG_BAR_GAP, y=INNER_PADDING,
+            fill=YELLOW, text_color=BLACK, align="left",
+        )
+        self._draw_flag_bar(draw, INNER_PADDING, INNER_PADDING, height)
+
     def _draw_new_badge(self, draw: ImageDraw.ImageDraw, right: int) -> None:
-        """Червона плашка NEW у правому верхньому куті."""
-        box = draw.textbbox((0, 0), BADGE_NEW, font=self._font_new)
-        text_width, text_height = box[2] - box[0], box[3] - box[1]
+        """Червона пігулка NEW у правому верхньому куті — єдиний акцент не
+        жовтого кольору, щоб миттєво відрізнялась від "фонових" плашок."""
+        self._draw_pill(
+            draw, BADGE_NEW, self._font_new,
+            x=right - INNER_PADDING, y=INNER_PADDING,
+            fill=BADGE_NEW_FILL, text_color=WHITE,
+            outline=BADGE_NEW_OUTLINE, outline_width=2, align="right",
+        )
 
-        x1 = right - text_width - INNER_PADDING - 8
-        y1 = INNER_PADDING
-        x2 = right - INNER_PADDING
-        y2 = y1 + text_height + 4
-
-        draw.rectangle([x1 - 4, y1 - 2, x2 + 4, y2 + 2], fill=BADGE_FILL)
-        draw.rectangle([x1 - 4, y1 - 2, x2 + 4, y2 + 2], outline=BADGE_OUTLINE, width=2)
-        draw.text((x1, y1), BADGE_NEW, font=self._font_new, fill=WHITE)
+    def _draw_favorite_badge(self, draw: ImageDraw.ImageDraw, bottom: int) -> None:
+        """Жовта пігулка "* Обране *" у лівому нижньому куті."""
+        box = draw.textbbox((0, 0), BADGE_FAVORITE, font=self._font_favorite)
+        height = (box[3] - box[1]) + PILL_PADDING_Y * 2
+        self._draw_pill(
+            draw, BADGE_FAVORITE, self._font_favorite,
+            x=INNER_PADDING, y=bottom - INNER_PADDING - height,
+            fill=YELLOW, text_color=BLACK, align="left",
+        )
 
     @staticmethod
-    def _draw_shadowed_text(draw, text: str, x: int, y: int, font, color) -> None:
-        """Текст із товстою (3 пікселі) тінню — характерний Minecraft-вигляд."""
-        for offset_x, offset_y in ((3, 3), (3, 0), (0, 3)):
-            draw.text((x + offset_x, y + offset_y), text, font=font,
-                      fill=TEXT_SHADOW, align="center")
-        draw.text((x, y), text, font=font, fill=color, align="center")
+    def _draw_flag_bar(draw: ImageDraw.ImageDraw, x: int, y: int, height: int) -> None:
+        """Вертикальна синьо-жовта смуга — компактний прапор-акцент."""
+        half = height // 2
+        draw.rectangle([x, y, x + FLAG_BAR_WIDTH, y + half], fill=FLAG_BLUE)
+        draw.rectangle([x, y + half, x + FLAG_BAR_WIDTH, y + height], fill=YELLOW)
+
+    @staticmethod
+    def _draw_pill(
+        draw: ImageDraw.ImageDraw, text: str, font, *, x: int, y: int,
+        fill, text_color, align: str = "left", outline=None, outline_width: int = 0,
+    ) -> tuple[int, int]:
+        """Малює заокруглену пігулку з текстом усередині.
+
+        `x` — ліва межа плашки (align="left") або права межа (align="right").
+        Відступ фону від країв тексту однаковий з усіх боків: `textbbox`
+        рахує ink-межі відносно точки малювання (не (0, 0) — трохи зсунуті
+        через метрику шрифту), тож точку малювання тексту компенсуємо на
+        -box[0]/-box[1], щоб ink-межі влучили точно в центр плашки з
+        відступом PILL_PADDING_X/Y звідусіль. Повертає (ширину, висоту) плашки.
+        """
+        box = draw.textbbox((0, 0), text, font=font)
+        text_width, text_height = box[2] - box[0], box[3] - box[1]
+
+        width = text_width + PILL_PADDING_X * 2
+        height = text_height + PILL_PADDING_Y * 2
+        x1 = x if align == "left" else x - width
+        y1 = y
+        x2, y2 = x1 + width, y1 + height
+        radius = height // 2
+
+        draw.rounded_rectangle(
+            [x1, y1, x2, y2], radius=radius, fill=fill,
+            outline=outline, width=outline_width if outline else 0,
+        )
+        draw.text(
+            (x1 + PILL_PADDING_X - box[0], y1 + PILL_PADDING_Y - box[1]),
+            text, font=font, fill=text_color,
+        )
+        return width, height
