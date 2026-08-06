@@ -120,19 +120,18 @@ class VacancyImageRenderer:
     # ── Внутрішні деталі ─────────────────────────────────────────────────────
 
     def _measure_title(self, wrapped: str) -> tuple[int, int]:
-        draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-        left, top, right, bottom = draw.textbbox((0, 0), wrapped, font=self._font_title)
+        left, top, right, bottom = self._measuring_draw().textbbox(
+            (0, 0), wrapped, font=self._font_title
+        )
         return right - left, bottom - top
 
     def _content_height(self, title_height: int, num: int, is_new: bool, is_favorite: bool) -> int:
         """Мінімальна висота, за якої вміст точно поміститься в рамку."""
-        draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-        number_height = (
-            self._pill_height(draw, "Вакансія #99", self._font_number) if num else 0
-        )
-        new_height = self._pill_height(draw, BADGE_NEW, self._font_new) if is_new else 0
+        draw = self._measuring_draw()
+        number_height = self._pill_size(draw, "Вакансія #99", self._font_number)[2] if num else 0
+        new_height = self._pill_size(draw, BADGE_NEW, self._font_new)[2] if is_new else 0
         favorite_height = (
-            self._pill_height(draw, BADGE_FAVORITE, self._font_favorite) if is_favorite else 0
+            self._pill_size(draw, BADGE_FAVORITE, self._font_favorite)[2] if is_favorite else 0
         )
 
         top_row = max(number_height, new_height) if (num or is_new) else 0
@@ -144,9 +143,19 @@ class VacancyImageRenderer:
         return content + INNER_PADDING * 2
 
     @staticmethod
-    def _pill_height(draw: ImageDraw.ImageDraw, text: str, font) -> int:
+    def _measuring_draw() -> ImageDraw.ImageDraw:
+        """Draw-контекст на 1×1 піксель — потрібен лише для textbbox-вимірів
+        перед тим, як відомий фінальний розмір картинки, не для малювання."""
+        return ImageDraw.Draw(Image.new("RGB", (1, 1)))
+
+    @staticmethod
+    def _pill_size(draw: ImageDraw.ImageDraw, text: str, font) -> tuple[tuple, int, int]:
+        """Єдине місце, де пігулка перетворюється з тексту на розмір:
+        (bbox, ширина, висота) з відступом PILL_PADDING_X/Y звідусіль."""
         box = draw.textbbox((0, 0), text, font=font)
-        return (box[3] - box[1]) + PILL_PADDING_Y * 2
+        width = (box[2] - box[0]) + PILL_PADDING_X * 2
+        height = (box[3] - box[1]) + PILL_PADDING_Y * 2
+        return box, width, height
 
     def _draw_number_badge(self, draw: ImageDraw.ImageDraw, num: int) -> None:
         """Жовта пігулка "Вакансія #N" у лівому верхньому куті, з прапором-
@@ -170,13 +179,13 @@ class VacancyImageRenderer:
         )
 
     def _draw_favorite_badge(self, draw: ImageDraw.ImageDraw, bottom: int) -> None:
-        """Жовта пігулка "* Обране *" у лівому нижньому куті."""
-        box = draw.textbbox((0, 0), BADGE_FAVORITE, font=self._font_favorite)
-        height = (box[3] - box[1]) + PILL_PADDING_Y * 2
+        """Жовта пігулка "* Обране *" у лівому нижньому куті — прив'язана до
+        нижнього краю через valign="bottom", тож висоту наперед рахувати не
+        треба (цим уже займається сам _draw_pill)."""
         self._draw_pill(
             draw, BADGE_FAVORITE, self._font_favorite,
-            x=INNER_PADDING, y=bottom - INNER_PADDING - height,
-            fill=YELLOW, text_color=BLACK, align="left",
+            x=INNER_PADDING, y=bottom - INNER_PADDING,
+            fill=YELLOW, text_color=BLACK, align="left", valign="bottom",
         )
 
     @staticmethod
@@ -186,27 +195,26 @@ class VacancyImageRenderer:
         draw.rectangle([x, y, x + FLAG_BAR_WIDTH, y + half], fill=FLAG_BLUE)
         draw.rectangle([x, y + half, x + FLAG_BAR_WIDTH, y + height], fill=YELLOW)
 
-    @staticmethod
     def _draw_pill(
-        draw: ImageDraw.ImageDraw, text: str, font, *, x: int, y: int,
-        fill, text_color, align: str = "left", outline=None, outline_width: int = 0,
+        self, draw: ImageDraw.ImageDraw, text: str, font, *, x: int, y: int,
+        fill, text_color, align: str = "left", valign: str = "top",
+        outline=None, outline_width: int = 0,
     ) -> tuple[int, int]:
         """Малює заокруглену пігулку з текстом усередині.
 
-        `x` — ліва межа плашки (align="left") або права межа (align="right").
-        Відступ фону від країв тексту однаковий з усіх боків: `textbbox`
+        `x`/`align` — ліва (align="left") чи права (align="right") межа
+        плашки. `y`/`valign` — те саме по вертикалі: верхня (valign="top")
+        чи нижня (valign="bottom") межа. Розмір бере з `_pill_size` — та сама
+        логіка, що й для попереднього підрахунку висоти картинки, тож
+        відступ від країв тексту завжди однаковий з усіх боків: `textbbox`
         рахує ink-межі відносно точки малювання (не (0, 0) — трохи зсунуті
         через метрику шрифту), тож точку малювання тексту компенсуємо на
-        -box[0]/-box[1], щоб ink-межі влучили точно в центр плашки з
-        відступом PILL_PADDING_X/Y звідусіль. Повертає (ширину, висоту) плашки.
+        -box[0]/-box[1], щоб ink-межі влучили точно в центр плашки. Повертає
+        (ширину, висоту) плашки.
         """
-        box = draw.textbbox((0, 0), text, font=font)
-        text_width, text_height = box[2] - box[0], box[3] - box[1]
-
-        width = text_width + PILL_PADDING_X * 2
-        height = text_height + PILL_PADDING_Y * 2
+        box, width, height = self._pill_size(draw, text, font)
         x1 = x if align == "left" else x - width
-        y1 = y
+        y1 = y if valign == "top" else y - height
         x2, y2 = x1 + width, y1 + height
         radius = height // 2
 
