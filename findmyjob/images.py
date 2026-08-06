@@ -14,6 +14,8 @@ INNER_PADDING = 12
 # Невелике заокруглення кутів рамки — суто косметика, тому не пов'язане з
 # INNER_PADDING (той рахує місце під текст, а не форму самої рамки).
 FRAME_CORNER_RADIUS = 16
+# Відступ червоного фону плашки NEW від країв літер — однаковий з усіх боків.
+NEW_BADGE_PADDING = 5
 
 # ── Палітра ───────────────────────────────────────────────────────────────────
 BACKGROUND = (15, 15, 45)
@@ -141,18 +143,30 @@ class VacancyImageRenderer:
         return content + INNER_PADDING * 2
 
     def _draw_new_badge(self, draw: ImageDraw.ImageDraw, right: int) -> None:
-        """Червона плашка NEW у правому верхньому куті."""
+        """Червона плашка NEW у правому верхньому куті.
+
+        Відступ фону від країв літер має бути однаковим з усіх боків, а
+        `textbbox` рахує ink-межі відносно точки малювання (яка не
+        збігається з (0, 0) через метрику шрифту — box[0]/box[1] зазвичай
+        трохи ненульові). Тому спершу міряємо bbox у (0, 0), будуємо
+        прямокутник бажаного розміру навколо нього, а тоді зсуваємо саму
+        точку малювання тексту на -box[0]/-box[1], щоб ink-межі влучили
+        точно всередину прямокутника з відступом NEW_BADGE_PADDING звідусіль.
+        """
         box = draw.textbbox((0, 0), BADGE_NEW, font=self._font_new)
         text_width, text_height = box[2] - box[0], box[3] - box[1]
 
-        x1 = right - text_width - INNER_PADDING - 8
-        y1 = INNER_PADDING
-        x2 = right - INNER_PADDING
-        y2 = y1 + text_height + 4
+        rect_x2 = right - INNER_PADDING
+        rect_y1 = INNER_PADDING
+        rect_x1 = rect_x2 - text_width - NEW_BADGE_PADDING * 2
+        rect_y2 = rect_y1 + text_height + NEW_BADGE_PADDING * 2
 
-        draw.rectangle([x1 - 4, y1 - 2, x2 + 4, y2 + 2], fill=BADGE_FILL)
-        draw.rectangle([x1 - 4, y1 - 2, x2 + 4, y2 + 2], outline=BADGE_OUTLINE, width=2)
-        draw.text((x1, y1), BADGE_NEW, font=self._font_new, fill=WHITE)
+        draw.rectangle(
+            [rect_x1, rect_y1, rect_x2, rect_y2], fill=BADGE_FILL, outline=BADGE_OUTLINE, width=2,
+        )
+        text_x = rect_x1 + NEW_BADGE_PADDING - box[0]
+        text_y = rect_y1 + NEW_BADGE_PADDING - box[1]
+        draw.text((text_x, text_y), BADGE_NEW, font=self._font_new, fill=WHITE)
 
     @staticmethod
     def _draw_shadowed_text(draw, text: str, x: int, y: int, font, color) -> None:
