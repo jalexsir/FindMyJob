@@ -11,6 +11,9 @@ from PIL import Image, ImageDraw, ImageFont
 CANVAS_WIDTH, CANVAS_HEIGHT = 800, 300
 WRAP_WIDTH = 26
 INNER_PADDING = 12
+# Невелике заокруглення кутів рамки — суто косметика, тому не пов'язане з
+# INNER_PADDING (той рахує місце під текст, а не форму самої рамки).
+FRAME_CORNER_RADIUS = 16
 
 # ── Палітра ───────────────────────────────────────────────────────────────────
 BACKGROUND = (15, 15, 45)
@@ -80,7 +83,9 @@ class VacancyImageRenderer:
         draw = ImageDraw.Draw(image, "RGBA")
         right, bottom = width - 1, height - 1
 
-        draw.rectangle([0, 0, right, bottom], outline=GOLD, width=3)
+        draw.rounded_rectangle(
+            [0, 0, right, bottom], radius=FRAME_CORNER_RADIUS, outline=GOLD, width=3
+        )
 
         if num:
             self._draw_shadowed_text(
