@@ -12,17 +12,25 @@ from PIL import Image, ImageDraw, ImageFont
 CANVAS_WIDTH, CANVAS_HEIGHT = 800, 300
 WRAP_WIDTH = 26
 INNER_PADDING = 12
-# Невелике заокруглення кутів рамки — суто косметика, тому не пов'язане з
-# INNER_PADDING (той рахує місце під текст, а не форму самої рамки).
-FRAME_CORNER_RADIUS = 16
+# Заокруглення кутів рамки — навмисно доволі помітне, щоб перекликалося із
+# заокругленням самої бульбашки повідомлення в Telegram, а не губилося на
+# його тлі. Не пов'язане з INNER_PADDING (той рахує місце під текст, а не
+# форму самої рамки).
+FRAME_CORNER_RADIUS = 26
 # Однаковий відступ фону пігулки від країв тексту з усіх боків — спільний
 # для всіх трьох плашок (номер, NEW, обране), щоб виглядали одним стилем.
 PILL_PADDING_X = 12
 PILL_PADDING_Y = 6
-# Прапор-акцент зліва від номера вакансії — той самий мотив, що й у логотипі
-# FIND MY JOB (вертикальна синьо-жовта смуга перед текстом).
+# Прапор-акцент — вертикальна синьо-жовта смуга на всю висоту картки,
+# приліплена до лівого борту (той самий мотив, що й у логотипі FIND MY
+# JOB, лише розтягнутий на всю довжину замість короткого акценту).
 FLAG_BAR_WIDTH = 8
-FLAG_BAR_GAP = 8
+# Відступ усіх трьох плашок (номер, NEW, обране) від країв рамки, до яких
+# вони примикають, — однаковий з усіх боків: верх для номера й NEW, лівий
+# бік для номера й обраного, правий для NEW, низ для обраного. Більше за
+# INNER_PADDING навмисно — із самим лише INNER_PADDING плашки впираються в
+# заокруглений кут рамки (FRAME_CORNER_RADIUS).
+BADGE_EDGE_MARGIN = 18
 
 # ── Палітра (виміряно з референсного логотипу) ────────────────────────────────
 BACKGROUND = (0, 0, 0)
@@ -40,7 +48,7 @@ FONT_SIZE_FAVORITE = 20
 FONT_SIZE_TITLE = 42
 
 BADGE_NEW = "NEW"
-BADGE_FAVORITE = "* Обране *"
+BADGE_FAVORITE = "★"
 
 # Кандидати шрифтів для різних ОС — беремо перший наявний
 FONT_CANDIDATES = (
@@ -90,6 +98,8 @@ class VacancyImageRenderer:
         height = max(CANVAS_HEIGHT, self._content_height(title_height, num, is_new, is_favorite))
 
         image = Image.new("RGB", (width, height), BACKGROUND)
+        self._draw_flag_stripe(image, width, height)
+
         draw = ImageDraw.Draw(image, "RGBA")
         right, bottom = width - 1, height - 1
 
@@ -135,12 +145,20 @@ class VacancyImageRenderer:
         )
 
         top_row = max(number_height, new_height) if (num or is_new) else 0
-        content = (
-            (top_row + INNER_PADDING if top_row else 0)
+        # Відступ від краю картинки до першого/останнього ряду — той самий
+        # BADGE_EDGE_MARGIN, що й у самих _draw_*_badge (інакше пігулка не
+        # влізла б точно в підраховану висоту). INNER_PADDING лишається лише
+        # для внутрішнього проміжку між рядом плашок і назвою та для країв
+        # без жодної плашки.
+        top_margin = BADGE_EDGE_MARGIN if top_row else INNER_PADDING
+        bottom_margin = BADGE_EDGE_MARGIN if favorite_height else INNER_PADDING
+        return (
+            top_margin
+            + (top_row + INNER_PADDING if top_row else 0)
             + title_height
             + (INNER_PADDING + favorite_height if favorite_height else 0)
+            + bottom_margin
         )
-        return content + INNER_PADDING * 2
 
     @staticmethod
     def _measuring_draw() -> ImageDraw.ImageDraw:
@@ -158,22 +176,22 @@ class VacancyImageRenderer:
         return box, width, height
 
     def _draw_number_badge(self, draw: ImageDraw.ImageDraw, num: int) -> None:
-        """Жовта пігулка "Вакансія #N" у лівому верхньому куті, з прапором-
-        акцентом зліва (той самий мотив, що й у логотипі FIND MY JOB)."""
+        """Жовта пігулка "Вакансія #N" у лівому верхньому куті. Прапор-акцент
+        малюється окремо на весь канвас (_draw_flag_stripe), тож тут лише
+        відступаємо від нього по горизонталі, щоб пігулка не перекривала смугу."""
         text = f"Вакансія #{num}"
-        _, height = self._draw_pill(
+        self._draw_pill(
             draw, text, self._font_number,
-            x=INNER_PADDING + FLAG_BAR_WIDTH + FLAG_BAR_GAP, y=INNER_PADDING,
+            x=BADGE_EDGE_MARGIN, y=BADGE_EDGE_MARGIN,
             fill=YELLOW, text_color=BLACK, align="left",
         )
-        self._draw_flag_bar(draw, INNER_PADDING, INNER_PADDING, height)
 
     def _draw_new_badge(self, draw: ImageDraw.ImageDraw, right: int) -> None:
         """Червона пігулка NEW у правому верхньому куті — єдиний акцент не
         жовтого кольору, щоб миттєво відрізнялась від "фонових" плашок."""
         self._draw_pill(
             draw, BADGE_NEW, self._font_new,
-            x=right - INNER_PADDING, y=INNER_PADDING,
+            x=right - BADGE_EDGE_MARGIN, y=BADGE_EDGE_MARGIN,
             fill=BADGE_NEW_FILL, text_color=WHITE,
             outline=BADGE_NEW_OUTLINE, outline_width=2, align="right",
         )
@@ -184,16 +202,34 @@ class VacancyImageRenderer:
         треба (цим уже займається сам _draw_pill)."""
         self._draw_pill(
             draw, BADGE_FAVORITE, self._font_favorite,
-            x=INNER_PADDING, y=bottom - INNER_PADDING,
+            x=BADGE_EDGE_MARGIN, y=bottom - BADGE_EDGE_MARGIN,
             fill=YELLOW, text_color=BLACK, align="left", valign="bottom",
         )
 
     @staticmethod
-    def _draw_flag_bar(draw: ImageDraw.ImageDraw, x: int, y: int, height: int) -> None:
-        """Вертикальна синьо-жовта смуга — компактний прапор-акцент."""
-        half = height // 2
-        draw.rectangle([x, y, x + FLAG_BAR_WIDTH, y + half], fill=FLAG_BLUE)
-        draw.rectangle([x, y + half, x + FLAG_BAR_WIDTH, y + height], fill=YELLOW)
+    def _draw_flag_stripe(image: Image.Image, width: int, height: int) -> None:
+        """Синьо-жовта стрічка прапора на всю висоту картки, приліплена до
+        лівого борту.
+
+        Малюється маскою: спершу біла заокруглена фігура точно такої ж форми
+        (і радіуса), що й основна рамка, — тому там, де рамка закруглюється
+        на кутах, стрічка природно звужується разом із нею, а не впирається
+        прямими кутами в заокруглений борт. Потім усе, крім лівої смуги
+        шириною FLAG_BAR_WIDTH, вирізається з маски, і кольоровий шар (синій
+        зверху, жовтий знизу) вставляється в базове зображення тільки там,
+        де маска непрозора.
+        """
+        mask = Image.new("L", (width, height), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.rounded_rectangle(
+            [0, 0, width - 1, height - 1], radius=FRAME_CORNER_RADIUS, fill=255,
+        )
+        mask_draw.rectangle([FLAG_BAR_WIDTH, 0, width - 1, height - 1], fill=0)
+
+        stripe = Image.new("RGB", (width, height), FLAG_BLUE)
+        ImageDraw.Draw(stripe).rectangle([0, height // 2, width - 1, height - 1], fill=YELLOW)
+
+        image.paste(stripe, (0, 0), mask)
 
     def _draw_pill(
         self, draw: ImageDraw.ImageDraw, text: str, font, *, x: int, y: int,
