@@ -119,6 +119,17 @@ CREATE TABLE IF NOT EXISTS known_users (
 );
 """
 
+# Один рядок: хеш останнього тексту з CHANGELOG_PENDING.md, надісланого
+# адміну (bot/changelog.py). Позначка навмисно в БД, а не в самому файлі —
+# файл git-трекований, і локальне очищення на сервері зламало б наступний
+# `git pull` (незакомічені правки конфліктували б із вхідними змінами).
+_CHANGELOG_STATE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS changelog_state (
+    id             INTEGER PRIMARY KEY CHECK (id = 1),
+    last_sent_hash TEXT
+);
+"""
+
 
 @dataclass(frozen=True)
 class ChatAnchors:
@@ -170,6 +181,7 @@ class VacancyStore:
             conn.execute(_NDA_BASELINE_SCHEMA)
             conn.execute(_NDA_NOTIFICATION_BASELINE_SCHEMA)
             conn.execute(_KNOWN_USERS_SCHEMA)
+            conn.execute(_CHANGELOG_STATE_SCHEMA)
 
     # ── Списки вакансій ──────────────────────────────────────────────────────
 
@@ -374,6 +386,23 @@ class VacancyStore:
                 [(chat_id, now) for (chat_id,) in rows],
             )
             return len(rows)
+
+    # ── Сповіщення адміну про оновлення (bot/changelog.py) ───────────────────
+
+    def load_last_sent_changelog_hash(self) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT last_sent_hash FROM changelog_state WHERE id = 1"
+            ).fetchone()
+        return row[0] if row else None
+
+    def save_last_sent_changelog_hash(self, text_hash: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO changelog_state (id, last_sent_hash) VALUES (1, ?) "
+                "ON CONFLICT(id) DO UPDATE SET last_sent_hash = excluded.last_sent_hash",
+                (text_hash,),
+            )
 
     # ── Внутрішні деталі ─────────────────────────────────────────────────────
 
