@@ -18,6 +18,7 @@ from findmyjob.bot.sending import VacancySender
 from findmyjob.bot.state import (
     StateRepository, favorites_key, hidden_key, notifications_key,
 )
+from findmyjob.bot.throttle import guarded
 from findmyjob.config import Settings
 from findmyjob.feeds import FeedFetcher, VacancyFeedService
 from findmyjob.images import VacancyImageRenderer
@@ -79,7 +80,14 @@ class BotApplication:
         )
 
     def build(self) -> Application:
-        application = Application.builder().token(self._settings.bot_token).build()
+        # concurrent_updates=True — необхідна умова для throttle.guarded():
+        # без нього PTB й так обробляє updates строго послідовно, тож
+        # per-chat lock ніколи не побачив би "зайнято" (попередній тап уже
+        # встиг би повністю завершитись, поки другий дійде до обробки).
+        application = (
+            Application.builder().token(self._settings.bot_token)
+            .concurrent_updates(True).build()
+        )
 
         self._store.init_db()
         self._backfill_known_users()
@@ -87,6 +95,7 @@ class BotApplication:
 
         for group in self._groups:
             for handler in group.handlers():
+                handler.callback = guarded(handler.callback)
                 application.add_handler(handler)
 
         self._schedule_jobs(application)
