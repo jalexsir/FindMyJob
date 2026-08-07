@@ -9,9 +9,8 @@ from telegram import Update
 from telegram.ext import BaseHandler, ContextTypes, MessageHandler, filters
 
 from findmyjob.bot import texts
-from findmyjob.bot.keyboards import build_persistent_keyboard
+from findmyjob.bot.keyboards import build_more_menu_keyboard
 from findmyjob.bot.state import StateRepository
-from findmyjob.feeds import NDA_CATEGORY
 
 from .base import HandlerGroup
 from .categories import CategoryHandlers
@@ -44,10 +43,8 @@ class MenuHandlers(HandlerGroup):
         maintenance: MaintenanceHandlers,
         nda_actions: NdaActionHandlers,
         categories: CategoryHandlers,
-        admin_user_id: int | None = None,
     ) -> None:
         super().__init__(states)
-        self._admin_user_id = admin_user_id
         self._routes: dict[str, MenuAction] = {
             texts.BTN_VAC_1D: lambda u, c: vacancies.request_from_message(u, c, days=1),
             texts.BTN_VAC_7D: lambda u, c: vacancies.request_from_message(u, c, days=7),
@@ -58,11 +55,6 @@ class MenuHandlers(HandlerGroup):
                 u.message.chat, u, c
             ),
             texts.BTN_MORE: self._show_more_menu,
-            texts.BTN_BACK: self._show_default_menu,
-            texts.BTN_CLEAR: lambda u, c: maintenance.send_clear_prompt(
-                u, c, chat_id=u.message.chat_id
-            ),
-            texts.BTN_CLEAR_HIDE: lambda u, c: hidden.clear_all(u.message.chat, u, c),
             texts.BTN_NDA_SHOW_NEW: nda_actions.show_new,
             texts.BTN_NDA_SHOW_ALL: nda_actions.show_all,
             texts.BTN_NDA_UPDATE_BASELINE: nda_actions.prompt_update_baseline,
@@ -85,51 +77,9 @@ class MenuHandlers(HandlerGroup):
             await action(update, context)
 
     async def _show_more_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """"⚙️ Ще" — підміняє верхній ряд меню рідковживаними діями
-        (очищення); "◀️ Назад" (_show_default_menu) повертає попередній вигляд.
-
-        Видаляти повідомлення-носія клавіатури не можна (PR #74 зламав саму
-        ReplyKeyboardMarkup, відкат у #75) — лишається саме натискання кнопки
-        "⚙️ Ще", воно жодної інформації не несе, тож приберемо хоча б його:
-        2 повідомлення в чаті замість 4.
-        """
+        """"⚙️ Ще" — рідковживані дії (очищення) інлайн-підменю замість
+        окремих кнопок постійного меню."""
         message = await update.message.reply_text(
-            texts.MSG_MORE_MENU, reply_markup=build_persistent_keyboard(more_mode=True)
+            texts.MSG_MORE_MENU, reply_markup=build_more_menu_keyboard()
         )
         self.session(update, context).track(message.message_id)
-        await self._delete_tap(update, context)
-
-    async def _show_default_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """"◀️ Назад" — повертає той вигляд меню, що був до "⚙️ Ще": NDA-режим,
-        якщо єдина обрана категорія — NDA-All, інакше звичайні кнопки періоду.
-        Саме натискання "◀️ Назад" видаляється — див. `_show_more_menu`."""
-        nda_mode = self.user_state(update, context).categories == [NDA_CATEGORY]
-        message = await update.message.reply_text(
-            texts.MSG_MORE_MENU,
-            reply_markup=build_persistent_keyboard(nda_mode=nda_mode, is_admin=self._is_admin(update)),
-        )
-        self.session(update, context).track(message.message_id)
-        await self._delete_tap(update, context)
-
-    @staticmethod
-    async def _delete_tap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Прибирає вхідне повідомлення-натискання кнопки (не носія клавіатури!).
-
-        На відміну від повідомлення бота з ReplyKeyboardMarkup, видалення
-        вхідного повідомлення на клавіатуру ніяк не впливає — воно належить
-        користувачу, а не є носієм клавіатури.
-        """
-        try:
-            await context.bot.delete_message(
-                chat_id=update.message.chat_id, message_id=update.message.message_id
-            )
-        except Exception:
-            pass
-
-    def _is_admin(self, update: Update) -> bool:
-        user = update.effective_user
-        return (
-            user is not None
-            and self._admin_user_id is not None
-            and user.id == self._admin_user_id
-        )
