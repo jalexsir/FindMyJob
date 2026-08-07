@@ -91,12 +91,16 @@ class MenuHandlers(HandlerGroup):
         Telegram застосовує нову ReplyKeyboardMarkup для чату вже в момент
         доставки повідомлення-носія — видалення цього повідомлення одразу
         після відправки на клавіатуру не впливає, а зайва бульбашка тексту
-        більше не зсуває фокус користувача.
+        більше не зсуває фокус користувача. Так само видаляється й саме
+        натискання кнопки (текстове повідомлення "⚙️ Ще" від користувача) —
+        воно теж не несе інформації, лише зсуває фокус.
         """
         message = await update.message.reply_text(
             texts.MSG_MORE_MENU, reply_markup=build_persistent_keyboard(more_mode=True)
         )
-        await context.bot.delete_message(chat_id=update.message.chat_id, message_id=message.message_id)
+        chat_id = update.message.chat_id
+        await context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
+        await context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id)
 
     async def _show_default_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """"◀️ Назад" — повертає той вигляд меню, що був до "⚙️ Ще": NDA-режим,
