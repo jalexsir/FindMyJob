@@ -88,25 +88,43 @@ class MenuHandlers(HandlerGroup):
         """"⚙️ Ще" — підміняє верхній ряд меню рідковживаними діями
         (очищення); "◀️ Назад" (_show_default_menu) повертає попередній вигляд.
 
-        Повідомлення-носія клавіатури не можна видалити одразу після
-        відправки: Telegram-клієнти скидають ReplyKeyboardMarkup разом із
-        видаленням повідомлення, що його показало (перевірено на бойовому
-        боті — раніше тут була спроба видаляти, вона ламала клавіатуру).
+        Видаляти повідомлення-носія клавіатури не можна (PR #74 зламав саму
+        ReplyKeyboardMarkup, відкат у #75) — лишається саме натискання кнопки
+        "⚙️ Ще", воно жодної інформації не несе, тож приберемо хоча б його:
+        2 повідомлення в чаті замість 4.
         """
         message = await update.message.reply_text(
             texts.MSG_MORE_MENU, reply_markup=build_persistent_keyboard(more_mode=True)
         )
         self.session(update, context).track(message.message_id)
+        await self._delete_tap(update, context)
 
     async def _show_default_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """"◀️ Назад" — повертає той вигляд меню, що був до "⚙️ Ще": NDA-режим,
-        якщо єдина обрана категорія — NDA-All, інакше звичайні кнопки періоду."""
+        якщо єдина обрана категорія — NDA-All, інакше звичайні кнопки періоду.
+        Саме натискання "◀️ Назад" видаляється — див. `_show_more_menu`."""
         nda_mode = self.user_state(update, context).categories == [NDA_CATEGORY]
         message = await update.message.reply_text(
             texts.MSG_BACK_TO_MENU,
             reply_markup=build_persistent_keyboard(nda_mode=nda_mode, is_admin=self._is_admin(update)),
         )
         self.session(update, context).track(message.message_id)
+        await self._delete_tap(update, context)
+
+    @staticmethod
+    async def _delete_tap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Прибирає вхідне повідомлення-натискання кнопки (не носія клавіатури!).
+
+        На відміну від повідомлення бота з ReplyKeyboardMarkup, видалення
+        вхідного повідомлення на клавіатуру ніяк не впливає — воно належить
+        користувачу, а не є носієм клавіатури.
+        """
+        try:
+            await context.bot.delete_message(
+                chat_id=update.message.chat_id, message_id=update.message.message_id
+            )
+        except Exception:
+            pass
 
     def _is_admin(self, update: Update) -> bool:
         user = update.effective_user
