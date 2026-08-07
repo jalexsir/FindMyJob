@@ -71,8 +71,17 @@ def format_vacancy(vacancy: Vacancy) -> str:
         lines.append(
             f"📅 <b>Дата публікації:</b> {html.escape(format_date_ua(vacancy.published))}"
         )
-    lines.append(f"🌐 <b>Фільтр:</b> {html.escape(vacancy.source)}")
+    lines.append(f"🌐 {_source_line(vacancy.source)}")
     return "\n".join(lines)
+
+
+def _source_line(source: str) -> str:
+    """"DOU (Deftech) Python" → "<b>DOU:</b> (Deftech) Python" — назва сайту
+    (DOU / Djinni / NDA, перше слово source) жирним і з двокрапкою замість
+    спільного для всіх джерел підпису "Фільтр:"."""
+    site, _, rest = source.partition(" ")
+    site_html = f"<b>{html.escape(site)}:</b>"
+    return f"{site_html} {html.escape(rest)}" if rest else site_html
 
 
 def build_summary(sources: list[MergedSource], days: int | None, hidden_count: int = 0) -> str:
