@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from telegram.ext import Application
 
+from findmyjob.bot.changelog import notify_admin_of_update
 from findmyjob.bot.handlers import (
     CategoryHandlers, FavoriteHandlers, HandlerGroup, HiddenHandlers,
     MaintenanceHandlers, MenuHandlers, NdaActionHandlers, NotificationHandlers,
@@ -86,7 +87,7 @@ class BotApplication:
         # встиг би повністю завершитись, поки другий дійде до обробки).
         application = (
             Application.builder().token(self._settings.bot_token)
-            .concurrent_updates(True).build()
+            .concurrent_updates(True).post_init(self._notify_admin_of_update).build()
         )
 
         self._store.init_db()
@@ -100,6 +101,12 @@ class BotApplication:
 
         self._schedule_jobs(application)
         return application
+
+    async def _notify_admin_of_update(self, application: Application) -> None:
+        """post_init: раз на старт процесу — див. bot/changelog.py."""
+        await notify_admin_of_update(
+            application.bot, self._store, self._settings.admin_user_id
+        )
 
     def _schedule_jobs(self, application: Application) -> None:
         """Погодинна розсилка сповіщень і нічне прибирання журналу.
