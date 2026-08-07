@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 from typing import Awaitable, Callable, Sequence
 
@@ -26,12 +25,6 @@ from .vacancies import VacancyHandlers
 MenuAction = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]]
 
 _MENU_PATTERN = "^({})$".format("|".join(re.escape(text) for text in texts.ALL_BUTTON_TEXTS))
-
-# Попередня спроба видаляти повідомлення-носія клавіатури одразу після
-# відправки скидала й саму ReplyKeyboardMarkup на боці клієнта — Telegram,
-# судячи з усього, встигає застосувати нову клавіатуру не миттєво.
-# Затримка — спроба дати клієнту час, гарантії немає.
-_MORE_MENU_CLEANUP_DELAY_SECONDS = 1.5
 
 
 class MenuHandlers(HandlerGroup):
@@ -95,33 +88,43 @@ class MenuHandlers(HandlerGroup):
         """"⚙️ Ще" — підміняє верхній ряд меню рідковживаними діями
         (очищення); "◀️ Назад" (_show_default_menu) повертає попередній вигляд.
 
-        І повідомлення-носія клавіатури, і саме натискання кнопки видаляються
-        із затримкою (`_MORE_MENU_CLEANUP_DELAY_SECONDS`) — попередня спроба
-        видаляти одразу зламала клавіатуру на боці клієнта (PR #74, відкат у
-        #75). Видалення в `try/except`: якщо котресь не вдасться (наприклад,
-        користувач сам встиг стерти повідомлення), решта сценарію не має
-        падати через це.
+        Видаляти повідомлення-носія клавіатури не можна (PR #74 зламав саму
+        ReplyKeyboardMarkup, відкат у #75) — лишається саме натискання кнопки
+        "⚙️ Ще", воно жодної інформації не несе, тож приберемо хоча б його:
+        2 повідомлення в чаті замість 4.
         """
         message = await update.message.reply_text(
             texts.MSG_MORE_MENU, reply_markup=build_persistent_keyboard(more_mode=True)
         )
-        chat_id = update.message.chat_id
-        await asyncio.sleep(_MORE_MENU_CLEANUP_DELAY_SECONDS)
-        for message_id in (message.message_id, update.message.message_id):
-            try:
-                await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-            except Exception:
-                pass
+        self.session(update, context).track(message.message_id)
+        await self._delete_tap(update, context)
 
     async def _show_default_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """"◀️ Назад" — повертає той вигляд меню, що був до "⚙️ Ще": NDA-режим,
-        якщо єдина обрана категорія — NDA-All, інакше звичайні кнопки періоду."""
+        якщо єдина обрана категорія — NDA-All, інакше звичайні кнопки періоду.
+        Саме натискання "◀️ Назад" видаляється — див. `_show_more_menu`."""
         nda_mode = self.user_state(update, context).categories == [NDA_CATEGORY]
         message = await update.message.reply_text(
             texts.MSG_BACK_TO_MENU,
             reply_markup=build_persistent_keyboard(nda_mode=nda_mode, is_admin=self._is_admin(update)),
         )
         self.session(update, context).track(message.message_id)
+        await self._delete_tap(update, context)
+
+    @staticmethod
+    async def _delete_tap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Прибирає вхідне повідомлення-натискання кнопки (не носія клавіатури!).
+
+        На відміну від повідомлення бота з ReplyKeyboardMarkup, видалення
+        вхідного повідомлення на клавіатуру ніяк не впливає — воно належить
+        користувачу, а не є носієм клавіатури.
+        """
+        try:
+            await context.bot.delete_message(
+                chat_id=update.message.chat_id, message_id=update.message.message_id
+            )
+        except Exception:
+            pass
 
     def _is_admin(self, update: Update) -> bool:
         user = update.effective_user
