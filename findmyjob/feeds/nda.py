@@ -26,9 +26,12 @@ from .parsing.text import collapse_spaces, unescape_twice
 logger = logging.getLogger(__name__)
 
 NDA_CATEGORY = "NDA-All"
-# Ніколи не повинно збігатися з Site.DOU.value/Site.DJINNI.value — це поле лише
-# для відображення ("Фільтр" під карткою), тож будь-яке унікальне ім'я підійде.
-NDA_SOURCE_NAME = "NDA"
+# Ніколи не повинно збігатися з Site.DOU.value/Site.DJINNI.value — це поле
+# лише для відображення (рядок сайту під карткою: "NDA: All"), тож будь-яке
+# унікальне ім'я підійде. Пробіл навмисний: formatting._source_line() ділить
+# source на "сайт" (перше слово, жирним) і "решту" за першим пробілом — той
+# самий парсинг, що й для "DOU (Deftech) Python"/"Djinni (бронювання) QA".
+NDA_SOURCE_NAME = "NDA All"
 NDA_URL = "https://nda.in.ua/all"
 NDA_HEADERS = {"User-Agent": "FindMyJobAgregator/1.0"}
 NDA_TIMEOUT = 8
