@@ -46,7 +46,7 @@ FONT_SIZE_FAVORITE = 20
 FONT_SIZE_TITLE = 42
 
 BADGE_NEW = "NEW"
-BADGE_FAVORITE = "* Обране *"
+BADGE_FAVORITE = "★"
 
 # Кандидати шрифтів для різних ОС — беремо перший наявний
 FONT_CANDIDATES = (
