@@ -119,14 +119,20 @@ CREATE TABLE IF NOT EXISTS known_users (
 );
 """
 
-# Один рядок: хеш останнього тексту з CHANGELOG_PENDING.md, надісланого
-# адміну (bot/changelog.py). Позначка навмисно в БД, а не в самому файлі —
-# файл git-трекований, і локальне очищення на сервері зламало б наступний
+# Кому з known_users вже розіслано текст із CHANGELOG_PENDING.md
+# (bot/changelog.py) — ключ (user_id, text_hash), тож новий текст релізу
+# (інший хеш) автоматично розсилається всім наново, а перерваний на
+# половині процес (рестарт, збій мережі) при новому старті просто
+# продовжує з тих user_id, кого в цій таблиці для поточного хеша ще нема.
+# Позначка навмисно в БД, а не в самому CHANGELOG_PENDING.md — файл
+# git-трекований, і локальне очищення на сервері зламало б наступний
 # `git pull` (незакомічені правки конфліктували б із вхідними змінами).
-_CHANGELOG_STATE_SCHEMA = """
-CREATE TABLE IF NOT EXISTS changelog_state (
-    id             INTEGER PRIMARY KEY CHECK (id = 1),
-    last_sent_hash TEXT
+_CHANGELOG_SENT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS changelog_sent (
+    user_id   INTEGER NOT NULL,
+    text_hash TEXT    NOT NULL,
+    sent_at   TEXT    NOT NULL,
+    PRIMARY KEY (user_id, text_hash)
 );
 """
 
@@ -181,7 +187,7 @@ class VacancyStore:
             conn.execute(_NDA_BASELINE_SCHEMA)
             conn.execute(_NDA_NOTIFICATION_BASELINE_SCHEMA)
             conn.execute(_KNOWN_USERS_SCHEMA)
-            conn.execute(_CHANGELOG_STATE_SCHEMA)
+            conn.execute(_CHANGELOG_SENT_SCHEMA)
 
     # ── Списки вакансій ──────────────────────────────────────────────────────
 
@@ -387,21 +393,22 @@ class VacancyStore:
             )
             return len(rows)
 
-    # ── Сповіщення адміну про оновлення (bot/changelog.py) ───────────────────
+    # ── Розсилка анонсів оновлень (bot/changelog.py) ─────────────────────────
 
-    def load_last_sent_changelog_hash(self) -> str | None:
+    def load_changelog_sent_user_ids(self, text_hash: str) -> set[int]:
+        """Кому з цим хешем тексту вже розіслано — решта known_users ще чекає."""
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT last_sent_hash FROM changelog_state WHERE id = 1"
-            ).fetchone()
-        return row[0] if row else None
+            rows = conn.execute(
+                "SELECT user_id FROM changelog_sent WHERE text_hash = ?", (text_hash,)
+            ).fetchall()
+        return {row[0] for row in rows}
 
-    def save_last_sent_changelog_hash(self, text_hash: str) -> None:
+    def mark_changelog_sent(self, user_id: int, text_hash: str) -> None:
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO changelog_state (id, last_sent_hash) VALUES (1, ?) "
-                "ON CONFLICT(id) DO UPDATE SET last_sent_hash = excluded.last_sent_hash",
-                (text_hash,),
+                "INSERT OR IGNORE INTO changelog_sent (user_id, text_hash, sent_at) "
+                "VALUES (?, ?, ?)",
+                (user_id, text_hash, datetime.now().isoformat()),
             )
 
     # ── Внутрішні деталі ─────────────────────────────────────────────────────
