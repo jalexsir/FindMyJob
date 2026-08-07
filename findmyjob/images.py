@@ -25,10 +25,12 @@ PILL_PADDING_Y = 6
 # приліплена до лівого борту (той самий мотив, що й у логотипі FIND MY
 # JOB, лише розтягнутий на всю довжину замість короткого акценту).
 FLAG_BAR_WIDTH = 8
-FLAG_BAR_GAP = 8
-# Наскільки NEW-плашку зсунуто вліво від правого краю понад INNER_PADDING —
-# з самим лише INNER_PADDING вона впритул до заокругленого кута рамки.
-NEW_BADGE_EXTRA_MARGIN = 6
+# Відступ усіх трьох плашок (номер, NEW, обране) від країв рамки, до яких
+# вони примикають, — однаковий з усіх боків: верх для номера й NEW, лівий
+# бік для номера й обраного, правий для NEW, низ для обраного. Більше за
+# INNER_PADDING навмисно — із самим лише INNER_PADDING плашки впираються в
+# заокруглений кут рамки (FRAME_CORNER_RADIUS).
+BADGE_EDGE_MARGIN = 18
 
 # ── Палітра (виміряно з референсного логотипу) ────────────────────────────────
 BACKGROUND = (0, 0, 0)
@@ -143,12 +145,20 @@ class VacancyImageRenderer:
         )
 
         top_row = max(number_height, new_height) if (num or is_new) else 0
-        content = (
-            (top_row + INNER_PADDING if top_row else 0)
+        # Відступ від краю картинки до першого/останнього ряду — той самий
+        # BADGE_EDGE_MARGIN, що й у самих _draw_*_badge (інакше пігулка не
+        # влізла б точно в підраховану висоту). INNER_PADDING лишається лише
+        # для внутрішнього проміжку між рядом плашок і назвою та для країв
+        # без жодної плашки.
+        top_margin = BADGE_EDGE_MARGIN if top_row else INNER_PADDING
+        bottom_margin = BADGE_EDGE_MARGIN if favorite_height else INNER_PADDING
+        return (
+            top_margin
+            + (top_row + INNER_PADDING if top_row else 0)
             + title_height
             + (INNER_PADDING + favorite_height if favorite_height else 0)
+            + bottom_margin
         )
-        return content + INNER_PADDING * 2
 
     @staticmethod
     def _measuring_draw() -> ImageDraw.ImageDraw:
@@ -172,7 +182,7 @@ class VacancyImageRenderer:
         text = f"Вакансія #{num}"
         self._draw_pill(
             draw, text, self._font_number,
-            x=FLAG_BAR_WIDTH + FLAG_BAR_GAP, y=INNER_PADDING,
+            x=BADGE_EDGE_MARGIN, y=BADGE_EDGE_MARGIN,
             fill=YELLOW, text_color=BLACK, align="left",
         )
 
@@ -181,7 +191,7 @@ class VacancyImageRenderer:
         жовтого кольору, щоб миттєво відрізнялась від "фонових" плашок."""
         self._draw_pill(
             draw, BADGE_NEW, self._font_new,
-            x=right - INNER_PADDING - NEW_BADGE_EXTRA_MARGIN, y=INNER_PADDING,
+            x=right - BADGE_EDGE_MARGIN, y=BADGE_EDGE_MARGIN,
             fill=BADGE_NEW_FILL, text_color=WHITE,
             outline=BADGE_NEW_OUTLINE, outline_width=2, align="right",
         )
@@ -192,7 +202,7 @@ class VacancyImageRenderer:
         треба (цим уже займається сам _draw_pill)."""
         self._draw_pill(
             draw, BADGE_FAVORITE, self._font_favorite,
-            x=INNER_PADDING, y=bottom - INNER_PADDING,
+            x=BADGE_EDGE_MARGIN, y=bottom - BADGE_EDGE_MARGIN,
             fill=YELLOW, text_color=BLACK, align="left", valign="bottom",
         )
 
