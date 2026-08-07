@@ -22,6 +22,10 @@ class MaintenanceHandlers(HandlerGroup):
 
     def handlers(self) -> Sequence[BaseHandler]:
         return (
+            # CB_CLEAR більше не породжується жодною поточною клавіатурою
+            # ("⚙️ Ще" прибрано, є пряма кнопка постійного меню) — але
+            # обробник лишається навмисно: у чатах могли лишитися старі
+            # повідомлення з інлайн-кнопкою "🧹 Очистити листування".
             CallbackQueryHandler(self.clear_history, pattern=cb.exact(cb.CB_CLEAR)),
             CallbackQueryHandler(self.confirm_clear, pattern=cb.exact(cb.CB_CLEAR_YES)),
             CallbackQueryHandler(self.cancel_clear, pattern=cb.exact(cb.CB_CLEAR_NO)),
