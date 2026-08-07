@@ -105,7 +105,7 @@ class MenuHandlers(HandlerGroup):
         Саме натискання "◀️ Назад" видаляється — див. `_show_more_menu`."""
         nda_mode = self.user_state(update, context).categories == [NDA_CATEGORY]
         message = await update.message.reply_text(
-            texts.MSG_BACK_TO_MENU,
+            texts.MSG_MORE_MENU,
             reply_markup=build_persistent_keyboard(nda_mode=nda_mode, is_admin=self._is_admin(update)),
         )
         self.session(update, context).track(message.message_id)
