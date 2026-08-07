@@ -19,12 +19,15 @@ BTN_BACK = "◀️ Назад"
 BTN_NDA_SHOW_NEW = "🆕 Показати нові"
 BTN_NDA_SHOW_ALL = "📋 Показати всі"
 BTN_NDA_UPDATE_BASELINE = "🔄 Оновити еталон"
+# Той самий підпис, що й серед інлайн-кнопок нижче — у nda_mode це кнопка
+# постійної клавіатури (єдиний вихід із NDA-режиму), деінде — інлайн.
+BTN_RESELECT_CATS = "🔄 Переобрати категорії пошуку"
 
 ALL_BUTTON_TEXTS = (
     BTN_VAC_1D, BTN_VAC_7D, BTN_VAC_ALL,
     BTN_SHOW_HIDDEN, BTN_FAVORITES, BTN_NOTIFICATIONS, BTN_MORE, BTN_BACK,
     BTN_CLEAR, BTN_CLEAR_HIDE,
-    BTN_NDA_SHOW_NEW, BTN_NDA_SHOW_ALL, BTN_NDA_UPDATE_BASELINE,
+    BTN_NDA_SHOW_NEW, BTN_NDA_SHOW_ALL, BTN_NDA_UPDATE_BASELINE, BTN_RESELECT_CATS,
 )
 
 # ── Підписи інлайн-кнопок ─────────────────────────────────────────────────────
@@ -37,7 +40,6 @@ BTN_REMOVE_FAVORITE = "💔 Прибрати з обраних"
 BTN_HIDE = "🙈 Не показувати"
 BTN_RESTORE = "👁 Відновити до перегляду"
 BTN_SHOW_HIDDEN_LIST = "🔍 Показати вилучені вакансії"
-BTN_RESELECT_CATS = "🔄 Переобрати категорії пошуку"
 BTN_RESET_CATEGORIES = "🗑 Скинути обрані категорії"
 BTN_NOTIFY_SETUP = "⚙️ Налаштувати сповіщення"
 BTN_NOTIFY_OFF = "🔕 Вимкнути сповіщення"

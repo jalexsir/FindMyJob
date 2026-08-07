@@ -58,13 +58,14 @@ class BotApplication:
         notifications = NotificationHandlers(self._states)
         maintenance = MaintenanceHandlers(self._states)
         nda_actions = NdaActionHandlers(self._states, sender, settings.admin_user_id)
+        categories = CategoryHandlers(self._states, settings.admin_user_id)
         self._notifier = NotificationDispatcher(self._states, feeds, sender)
         self._nda_notifier = NdaNotificationDispatcher(self._states, sender)
 
         # Порядок груп = порядок реєстрації обробників. Патерни callback_data не
         # перетинаються, а от текстові обробники меню мають бути останніми.
         self._groups: tuple[HandlerGroup, ...] = (
-            CategoryHandlers(self._states, settings.admin_user_id),
+            categories,
             vacancies,
             hidden,
             favorites,
@@ -73,7 +74,7 @@ class BotApplication:
             maintenance,
             MenuHandlers(
                 self._states, vacancies, hidden, favorites, notifications, maintenance,
-                nda_actions, settings.admin_user_id,
+                nda_actions, categories, settings.admin_user_id,
             ),
         )
 

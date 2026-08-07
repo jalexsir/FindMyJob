@@ -122,7 +122,9 @@ def build_persistent_keyboard(
     - `nda_mode=True` — обрана лише категорія NDA-All: верхній ряд замінюється
       на її дії ("1 день / 7 днів / всі вакансії" тут не мають сенсу — це один
       спільний список без дат публікації). `is_admin` додає туди ще й кнопку
-      оновлення еталону — лише для власника бота.
+      оновлення еталону — лише для власника бота. Нижній ряд отримує ще й
+      "🔄 Переобрати категорії пошуку" — єдиний спосіб вийти з NDA-режиму,
+      бо звичайні кнопки періоду тут не показуються.
     - `more_mode=True` — після "⚙️ Ще": верхній ряд стає рідковживаними діями
       (очищення), а нижній — самотньою кнопкою "◀️ Назад", яка повертає
       попередній вигляд (nda_mode чи звичайний — вирішує виклик).
@@ -137,13 +139,14 @@ def build_persistent_keyboard(
             ]
             if is_admin:
                 top_row.append(KeyboardButton(texts.BTN_NDA_UPDATE_BASELINE))
+            bottom_row = [KeyboardButton(texts.BTN_RESELECT_CATS), KeyboardButton(texts.BTN_MORE)]
         else:
             top_row = [
                 KeyboardButton(texts.BTN_VAC_1D),
                 KeyboardButton(texts.BTN_VAC_7D),
                 KeyboardButton(texts.BTN_VAC_ALL),
             ]
-        bottom_row = [KeyboardButton(texts.BTN_MORE)]
+            bottom_row = [KeyboardButton(texts.BTN_MORE)]
 
     return ReplyKeyboardMarkup(
         [

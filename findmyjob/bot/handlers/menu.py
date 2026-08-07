@@ -14,6 +14,7 @@ from findmyjob.bot.state import StateRepository
 from findmyjob.feeds import NDA_CATEGORY
 
 from .base import HandlerGroup
+from .categories import CategoryHandlers
 from .favorites import FavoriteHandlers
 from .hidden import HiddenHandlers
 from .maintenance import MaintenanceHandlers
@@ -42,6 +43,7 @@ class MenuHandlers(HandlerGroup):
         notifications: NotificationHandlers,
         maintenance: MaintenanceHandlers,
         nda_actions: NdaActionHandlers,
+        categories: CategoryHandlers,
         admin_user_id: int | None = None,
     ) -> None:
         super().__init__(states)
@@ -64,6 +66,7 @@ class MenuHandlers(HandlerGroup):
             texts.BTN_NDA_SHOW_NEW: nda_actions.show_new,
             texts.BTN_NDA_SHOW_ALL: nda_actions.show_all,
             texts.BTN_NDA_UPDATE_BASELINE: nda_actions.prompt_update_baseline,
+            texts.BTN_RESELECT_CATS: categories.reselect_from_menu,
         }
         self._maintenance = maintenance
 
