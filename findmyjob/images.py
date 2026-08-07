@@ -89,13 +89,21 @@ class VacancyImageRenderer:
         *,
         is_new: bool = False,
         is_favorite: bool = False,
+        top_left_text: str | None = None,
     ) -> io.BytesIO:
-        """Картинка фіксованого розміру: чорний блок на весь канвас, без рамки."""
+        """Картинка фіксованого розміру: чорний блок на весь канвас, без рамки.
+
+        `top_left_text` підміняє текст лівої верхньої пігулки (типово
+        "Вакансія #N") довільним рядком — напр. датою для карток поза
+        контекстом вакансій (bot/changelog.py)."""
         wrapped = textwrap.fill(title, width=WRAP_WIDTH)
         title_width, title_height = self._measure_title(wrapped)
 
         width = CANVAS_WIDTH
-        height = max(CANVAS_HEIGHT, self._content_height(title_height, num, is_new, is_favorite))
+        height = max(
+            CANVAS_HEIGHT,
+            self._content_height(title_height, bool(num or top_left_text), is_new, is_favorite),
+        )
 
         image = Image.new("RGB", (width, height), BACKGROUND)
         self._draw_flag_stripe(image, width, height)
@@ -103,8 +111,8 @@ class VacancyImageRenderer:
         draw = ImageDraw.Draw(image, "RGBA")
         right, bottom = width - 1, height - 1
 
-        if num:
-            self._draw_number_badge(draw, num)
+        if num or top_left_text:
+            self._draw_number_badge(draw, num, override_text=top_left_text)
         if is_new:
             self._draw_new_badge(draw, right)
 
@@ -131,16 +139,21 @@ class VacancyImageRenderer:
         )
         return right - left, bottom - top
 
-    def _content_height(self, title_height: int, num: int, is_new: bool, is_favorite: bool) -> int:
+    def _content_height(
+        self, title_height: int, has_top_left_badge: bool, is_new: bool, is_favorite: bool
+    ) -> int:
         """Мінімальна висота, за якої вміст точно поміститься в рамку."""
         draw = self._measuring_draw()
-        number_height = self._pill_size(draw, "Вакансія #99", self._font_number)[2] if num else 0
+        number_height = (
+            self._pill_size(draw, "Вакансія #99", self._font_number)[2]
+            if has_top_left_badge else 0
+        )
         new_height = self._pill_size(draw, BADGE_NEW, self._font_new)[2] if is_new else 0
         favorite_height = (
             self._pill_size(draw, BADGE_FAVORITE, self._font_favorite)[2] if is_favorite else 0
         )
 
-        top_row = max(number_height, new_height) if (num or is_new) else 0
+        top_row = max(number_height, new_height) if (has_top_left_badge or is_new) else 0
         # Відступ від краю картинки до першого/останнього ряду — той самий
         # BADGE_EDGE_MARGIN, що й у самих _draw_*_badge (інакше пігулка не
         # влізла б точно в підраховану висоту). INNER_PADDING лишається лише
@@ -171,11 +184,15 @@ class VacancyImageRenderer:
         height = (box[3] - box[1]) + PILL_PADDING_Y * 2
         return box, width, height
 
-    def _draw_number_badge(self, draw: ImageDraw.ImageDraw, num: int) -> None:
-        """Жовта пігулка "Вакансія #N" у лівому верхньому куті. Прапор-акцент
-        малюється окремо на весь канвас (_draw_flag_stripe), тож тут лише
-        відступаємо від нього по горизонталі, щоб пігулка не перекривала смугу."""
-        text = f"Вакансія #{num}"
+    def _draw_number_badge(
+        self, draw: ImageDraw.ImageDraw, num: int, override_text: str | None = None
+    ) -> None:
+        """Жовта пігулка "Вакансія #N" у лівому верхньому куті (або довільний
+        `override_text` замість неї — напр. дата на неваканційних картках).
+        Прапор-акцент малюється окремо на весь канвас (_draw_flag_stripe),
+        тож тут лише відступаємо від нього по горизонталі, щоб пігулка не
+        перекривала смугу."""
+        text = override_text if override_text is not None else f"Вакансія #{num}"
         self._draw_pill(
             draw, text, self._font_number,
             x=BADGE_EDGE_MARGIN, y=BADGE_EDGE_MARGIN,

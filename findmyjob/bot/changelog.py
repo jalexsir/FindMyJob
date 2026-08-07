@@ -5,7 +5,8 @@
 далі — пункти списком, кожен з "- "). На старті бот читає його; якщо там є
 текст і його хеш відрізняється від хеша останнього надісланого (SQLite,
 `changelog_state`) — надсилає адміну картинку в бренд-стилі карток вакансій
-("Оновлення до {версія}") з підписом-переліком змін і запам'ятовує хеш.
+("Оновлено до версії v{версія}", дата замість номера вакансії у плашці) з
+підписом-переліком змін і запам'ятовує хеш.
 
 Сам файл на диску НЕ чиститься: сервер оновлюється через `git pull`, а
 локальна зміна git-трекованого файлу зламала б наступний деплой (git
@@ -19,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from datetime import datetime
 from pathlib import Path
 
 from telegram import Bot
@@ -57,7 +59,9 @@ async def notify_admin_of_update(
     if store.load_last_sent_changelog_hash() == text_hash:
         return
 
-    photo = _renderer.render(f"Оновлення до {version}")
+    photo = _renderer.render(
+        f"Оновлено до версії v{version}", top_left_text=datetime.now().strftime("%d.%m.%Y")
+    )
     caption = _compose_caption(version, bullets)
 
     try:
