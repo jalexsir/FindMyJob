@@ -12,8 +12,8 @@ from telegram.ext import BaseHandler, CallbackQueryHandler, CommandHandler, Cont
 from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
 from findmyjob.bot.keyboards import (
-    CategoryToggleBlocked, build_intro_continue_keyboard, build_persistent_keyboard,
-    toggle_category,
+    CategoryToggleBlocked, build_category_keyboard, build_intro_continue_keyboard,
+    build_persistent_keyboard, toggle_category,
 )
 from findmyjob.bot.state import StateRepository
 from findmyjob.feeds import NDA_CATEGORY
@@ -161,3 +161,20 @@ class CategoryHandlers(HandlerGroup):
     @staticmethod
     async def _render_selection(query, selected: list[str], page: int) -> None:
         await render_category_selection(query, selected, page, texts.categories_status)
+
+    async def reselect_from_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """"🔄 Переобрати категорії пошуку" з постійного меню (кнопка в
+        NDA-режимі) — та сама дія, що й callback `reselect()`, але тут немає
+        callback_query, який можна відредагувати, тож надсилає нове
+        повідомлення."""
+        session = self.session(update, context)
+        session.clear_pending()
+        session.category_page = 0
+
+        selected = self.user_state(update, context).categories
+        message = await update.message.reply_text(
+            texts.categories_status(selected),
+            parse_mode=ParseMode.HTML,
+            reply_markup=build_category_keyboard(selected, 0),
+        )
+        session.track(message.message_id)
