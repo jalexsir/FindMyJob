@@ -90,7 +90,7 @@ class VacancyImageRenderer:
         is_new: bool = False,
         is_favorite: bool = False,
     ) -> io.BytesIO:
-        """Картинка фіксованого розміру: чорний блок із жовтою рамкою на весь канвас."""
+        """Картинка фіксованого розміру: чорний блок на весь канвас, без рамки."""
         wrapped = textwrap.fill(title, width=WRAP_WIDTH)
         title_width, title_height = self._measure_title(wrapped)
 
@@ -102,10 +102,6 @@ class VacancyImageRenderer:
 
         draw = ImageDraw.Draw(image, "RGBA")
         right, bottom = width - 1, height - 1
-
-        draw.rounded_rectangle(
-            [0, 0, right, bottom], radius=FRAME_CORNER_RADIUS, outline=YELLOW, width=3
-        )
 
         if num:
             self._draw_number_badge(draw, num)
