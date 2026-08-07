@@ -9,12 +9,10 @@ BTN_VAC_ALL = "📋 Всі вакансії"
 BTN_SHOW_HIDDEN = "🔍 Вилучені"
 BTN_FAVORITES = "⭐ Обране"
 BTN_NOTIFICATIONS = "🔔 Сповіщення"
-# Більше не кнопки нижнього меню — рідковживані дії, тепер інлайн під "⚙️ Ще"
-# (build_more_menu_keyboard), callback_data лишається той самий (CB_CLEAR /
-# CB_CLEAR_HIDE), тож самі підписи можна коротшати без зачіпання логіки.
 BTN_CLEAR = "🧹 Очистити листування"
+# Інлайн-підпис (build_show_hidden_prompt_keyboard) — над "🔍 Показати
+# вилучені вакансії", а не кнопка постійної клавіатури.
 BTN_CLEAR_HIDE = "🧹 Очистити вилучені"
-BTN_MORE = "⚙️ Ще"
 BTN_NDA_SHOW_NEW = "🆕 Показати нові"
 BTN_NDA_SHOW_ALL = "📋 Показати всі"
 BTN_NDA_UPDATE_BASELINE = "🔄 Оновити еталон"
@@ -24,7 +22,7 @@ BTN_RESELECT_CATS = "🔄 Переобрати категорії пошуку"
 
 ALL_BUTTON_TEXTS = (
     BTN_VAC_1D, BTN_VAC_7D, BTN_VAC_ALL,
-    BTN_SHOW_HIDDEN, BTN_FAVORITES, BTN_NOTIFICATIONS, BTN_MORE,
+    BTN_SHOW_HIDDEN, BTN_FAVORITES, BTN_NOTIFICATIONS, BTN_CLEAR,
     BTN_NDA_SHOW_NEW, BTN_NDA_SHOW_ALL, BTN_NDA_UPDATE_BASELINE, BTN_RESELECT_CATS,
 )
 
@@ -68,7 +66,6 @@ MSG_INTRO = (
     "після перезапуску."
 )
 MSG_INTRO_FOOTER = "Вище ти можеш ознайомитися зі стислим описом функцій боту."
-MSG_MORE_MENU = "⚙️ Обери дію 👇"
 MSG_LOADING = "⏳ Завантажую вакансії, зачекай..."
 MSG_DEDUP_IN_PROGRESS = "🔀 Видалення дублікатів…"
 MSG_FETCHING = "⏳ Запрошую інформацію..."

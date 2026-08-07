@@ -122,11 +122,10 @@ def build_persistent_keyboard(
     "🔄 Переобрати категорії пошуку" — єдиний спосіб вийти з NDA-режиму, бо
     звичайні кнопки періоду тут не показуються.
 
-    "⚙️ Ще" (рідковживані дії — очищення) не підміняє цю клавіатуру: це
-    окреме інлайн-підменю (`build_more_menu_keyboard`), бо Bot API не дає
-    прикріпити ReplyKeyboardMarkup через редагування — лише через нове
-    повідомлення, а туди-сюди перемикати постійну клавіатуру заради
-    рідковживаних дій зайве.
+    "🧹 Очистити листування" — нижній ряд завжди, незалежно від режиму
+    ("⚙️ Ще"-підменю прибрано: рідковживана, але одна дія на постійній
+    клавіатурі не заважає, а "🧹 Очистити вилучені" переїхало в підказку
+    "🔍 Вилучені" — див. build_show_hidden_prompt_keyboard).
     """
     if nda_mode:
         top_row = [
@@ -134,14 +133,14 @@ def build_persistent_keyboard(
         ]
         if is_admin:
             top_row.append(KeyboardButton(texts.BTN_NDA_UPDATE_BASELINE))
-        bottom_row = [KeyboardButton(texts.BTN_RESELECT_CATS), KeyboardButton(texts.BTN_MORE)]
+        bottom_row = [KeyboardButton(texts.BTN_RESELECT_CATS), KeyboardButton(texts.BTN_CLEAR)]
     else:
         top_row = [
             KeyboardButton(texts.BTN_VAC_1D),
             KeyboardButton(texts.BTN_VAC_7D),
             KeyboardButton(texts.BTN_VAC_ALL),
         ]
-        bottom_row = [KeyboardButton(texts.BTN_MORE)]
+        bottom_row = [KeyboardButton(texts.BTN_CLEAR)]
 
     return ReplyKeyboardMarkup(
         [
@@ -154,18 +153,6 @@ def build_persistent_keyboard(
         resize_keyboard=True,
         is_persistent=True,
     )
-
-
-def build_more_menu_keyboard() -> InlineKeyboardMarkup:
-    """Підменю під кнопкою "⚙️ Ще" — рідковживані обслуговуючі дії, прибрані з
-    постійного меню, аби воно не пухнуло довгими підписами. callback_data —
-    ті самі CB_CLEAR / CB_CLEAR_HIDE, що й текстові кнопки очищення раніше:
-    MaintenanceHandlers.clear_history і HiddenHandlers.clear уже вміють
-    реагувати саме на ці callback_data."""
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(texts.BTN_CLEAR, callback_data=cb.CB_CLEAR)],
-        [InlineKeyboardButton(texts.BTN_CLEAR_HIDE, callback_data=cb.CB_CLEAR_HIDE)],
-    ])
 
 
 def build_category_keyboard(
@@ -350,8 +337,9 @@ def build_unhide_keyboard(short_link: str) -> InlineKeyboardMarkup:
 
 
 def build_show_hidden_prompt_keyboard() -> InlineKeyboardMarkup:
-    """Підтвердження показу списку вилучених."""
+    """Підтвердження показу списку вилучених + очищення цього ж списку."""
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_CLEAR_HIDE, callback_data=cb.CB_CLEAR_HIDE)],
         [InlineKeyboardButton(texts.BTN_SHOW_HIDDEN_LIST, callback_data=cb.CB_SHOW_HIDDEN)],
     ])
 
