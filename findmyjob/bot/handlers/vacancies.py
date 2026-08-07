@@ -189,7 +189,8 @@ class VacancyHandlers(HandlerGroup):
         message = await query.message.chat.send_message(
             f"✅ Всі доступні вакансії {texts.period_phrase(days)} "
             f"для категорій ({categories}) доступні для перегляду вище. "
-            f"({count} {texts.vacancies_word(count)})"
+            f"({count} {texts.vacancies_word(count)})",
+            reply_markup=build_reselect_keyboard(),
         )
         session.track(message.message_id)
 
