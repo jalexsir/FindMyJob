@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Awaitable, Callable, Sequence
 
@@ -25,6 +26,12 @@ from .vacancies import VacancyHandlers
 MenuAction = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]]
 
 _MENU_PATTERN = "^({})$".format("|".join(re.escape(text) for text in texts.ALL_BUTTON_TEXTS))
+
+# Попередня спроба видаляти повідомлення-носія клавіатури одразу після
+# відправки скидала й саму ReplyKeyboardMarkup на боці клієнта — Telegram,
+# судячи з усього, встигає застосувати нову клавіатуру не миттєво.
+# Затримка — спроба дати клієнту час, гарантії немає.
+_MORE_MENU_CLEANUP_DELAY_SECONDS = 1.5
 
 
 class MenuHandlers(HandlerGroup):
@@ -88,15 +95,23 @@ class MenuHandlers(HandlerGroup):
         """"⚙️ Ще" — підміняє верхній ряд меню рідковживаними діями
         (очищення); "◀️ Назад" (_show_default_menu) повертає попередній вигляд.
 
-        Повідомлення-носія клавіатури не можна видалити одразу після
-        відправки: Telegram-клієнти скидають ReplyKeyboardMarkup разом із
-        видаленням повідомлення, що його показало (перевірено на бойовому
-        боті — раніше тут була спроба видаляти, вона ламала клавіатуру).
+        І повідомлення-носія клавіатури, і саме натискання кнопки видаляються
+        із затримкою (`_MORE_MENU_CLEANUP_DELAY_SECONDS`) — попередня спроба
+        видаляти одразу зламала клавіатуру на боці клієнта (PR #74, відкат у
+        #75). Видалення в `try/except`: якщо котресь не вдасться (наприклад,
+        користувач сам встиг стерти повідомлення), решта сценарію не має
+        падати через це.
         """
         message = await update.message.reply_text(
             texts.MSG_MORE_MENU, reply_markup=build_persistent_keyboard(more_mode=True)
         )
-        self.session(update, context).track(message.message_id)
+        chat_id = update.message.chat_id
+        await asyncio.sleep(_MORE_MENU_CLEANUP_DELAY_SECONDS)
+        for message_id in (message.message_id, update.message.message_id):
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception:
+                pass
 
     async def _show_default_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """"◀️ Назад" — повертає той вигляд меню, що був до "⚙️ Ще": NDA-режим,
