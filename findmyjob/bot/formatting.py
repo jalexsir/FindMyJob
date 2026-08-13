@@ -61,7 +61,7 @@ def format_vacancy(vacancy: Vacancy) -> str:
     if vacancy.company:
         lines.append(f"🏢 <b>Компанія:</b> {html.escape(vacancy.company)}")
     if vacancy.location:
-        lines.append(f"📍 <b>Місце роботи:</b> {html.escape(vacancy.location)}")
+        lines.append(f"📍 <b>Location:</b> {html.escape(vacancy.location)}")
 
     salary = clean_salary(vacancy.salary)
     if salary and salary != SALARY_UNSPECIFIED:
