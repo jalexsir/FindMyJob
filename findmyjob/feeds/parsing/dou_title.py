@@ -30,6 +30,15 @@ MAX_CITY_LENGTH = 25
 # потрапляє в той самий хвіст після назви компанії, що й реальна локація.
 _NOT_LOCATION_MARKER = "agency"
 
+# Організаційно-правова форма компанії ("АДС Авіа Тек, ТОВ, Київ") — стоїть
+# після назви через кому, за формою (коротке слово без цифр) невідмінне від
+# міста, тож без явного списку потрапляє в location разом зі справжнім містом.
+_LEGAL_FORM_MARKERS = {"тов", "тзов", "прат", "пат", "ват", "фоп", "дп", "кп", "пп"}
+
+
+def _is_legal_form_marker(candidate: str) -> bool:
+    return candidate.strip().rstrip(".").lower() in _LEGAL_FORM_MARKERS
+
 
 @dataclass(frozen=True)
 class ParsedTitle:
@@ -85,7 +94,7 @@ def parse_dou_title(raw_title: str) -> ParsedTitle:
         title=title,
         company=trim_company_tagline(company),
         salary=salary,
-        location=_strip_agency_marker(location),
+        location=_strip_location_noise(location),
     )
 
 
@@ -139,22 +148,26 @@ def _looks_like_city(candidate: str) -> bool:
         # винятку жадібний збір "схожих на місто" частин з кінця захоплює
         # й його разом із реальною локацією.
         and _NOT_LOCATION_MARKER not in candidate.lower()
+        # "АДС Авіа Тек, ТОВ" — організаційно-правова форма, не місто.
+        and not _is_legal_form_marker(candidate)
     )
 
 
-def _strip_agency_marker(location: str) -> str:
-    """Вирізає частину-хвіст на кшталт "recruitment agency" з готової локації.
+def _strip_location_noise(location: str) -> str:
+    """Вирізає хвіст-шум із готової локації: маркер типу найму ("agency") та
+    організаційно-правову форму компанії ("ТОВ"), що злипається з комою
+    після назви компанії ("АДС Авіа Тек, ТОВ, Київ").
 
     На відміну від `_looks_like_city` (застосовується лише в
     `split_company_and_cities`), сюди потрапляє й хвіст, зібраний
     `_split_leading_parts`/`_salary_and_location` напряму з частин після коми —
-    туди маркер агентства так само може влізти.
+    туди обидва маркери так само можуть влізти.
     """
-    if not location or _NOT_LOCATION_MARKER not in location.lower():
+    if not location:
         return location
     kept = [
         part for part in (p.strip() for p in location.split(","))
-        if _NOT_LOCATION_MARKER not in part.lower()
+        if _NOT_LOCATION_MARKER not in part.lower() and not _is_legal_form_marker(part)
     ]
     return ", ".join(kept).strip()
 
@@ -220,7 +233,7 @@ def _rescue_company(
         new_salary, new_location = _salary_and_location(parts, salary, location)
         return ParsedTitle(
             title=title, company=parts[0], salary=new_salary,
-            location=_strip_agency_marker(new_location),
+            location=_strip_location_noise(new_location),
         )
     return None
 
