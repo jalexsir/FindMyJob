@@ -20,7 +20,7 @@ from . import texts
 CATEGORIES_PER_PAGE = 10
 CATEGORIES_PER_ROW = 2
 # Більше — забагато RSS-запитів і занадто широке зведення
-MAX_SELECTED_CATEGORIES = 5
+MAX_SELECTED_CATEGORIES = 6
 
 # NDA-All в обох сценаріях — в кінці списку. У пошуку вона взаємовиключна з
 # рештою (окремий конвеєр без RSS/дати публікації, спільний список — див.
