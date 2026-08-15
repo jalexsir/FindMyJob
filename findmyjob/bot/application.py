@@ -76,7 +76,7 @@ class BotApplication:
             maintenance,
             MenuHandlers(
                 self._states, vacancies, hidden, favorites, notifications, maintenance,
-                nda_actions, categories,
+                nda_actions, categories, settings.admin_user_id,
             ),
         )
 
