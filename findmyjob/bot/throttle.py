@@ -13,11 +13,21 @@
 `Application` (лише тоді блокування одного чату не тримає весь бот — інші
 чати обробляються паралельно), а тут — банальний per-chat lock у
 `bot_data`, що вмикається на старті обробки й знімається по завершенню.
+
+Саму лише тривалість обробки як "час зайнятості" недостатньо: швидкі дії
+(наприклад, "Обране" — просто читання зі стану, без мережевих запитів)
+завершуються за долі секунди, тож наступний тап людини, що поспішно тисне
+кнопку кілька разів поспіль, майже завжди приходить уже ПІСЛЯ завершення
+попереднього — лок ніколи не встигає їх "спіймати", і кожен тап відпрацьовує
+окремо. Тому лок тримається не менше `_MIN_BUSY_SECONDS` від старту
+обробки, навіть якщо сам callback завершився миттєво.
 """
 
 from __future__ import annotations
 
+import asyncio
 import functools
+import time
 from typing import Awaitable, Callable, TypeVar
 
 from telegram import Update
@@ -27,11 +37,16 @@ _Handler = TypeVar("_Handler", bound=Callable[[Update, ContextTypes.DEFAULT_TYPE
 
 _BUSY_CHATS_KEY = "busy_chats"
 
+# Мінімальна тривалість блокування чату від старту обробки — щоб проковтнути
+# серію нетерплячих повторних тапів навіть по миттєвих діях.
+_MIN_BUSY_SECONDS = 1.5
+
 
 def guarded(callback: _Handler) -> _Handler:
-    """Обгортає callback обробника: доки він виконується, чат позначений
-    зайнятим — нові натискання (будь-яка кнопка) того самого чату
-    ігноруються, замість того щоб стати в чергу на повторне виконання.
+    """Обгортає callback обробника: доки він виконується (і ще щонайменше
+    `_MIN_BUSY_SECONDS` після старту), чат позначений зайнятим — нові
+    натискання (будь-яка кнопка) того самого чату ігноруються, замість того
+    щоб стати в чергу на повторне виконання.
     """
 
     @functools.wraps(callback)
@@ -46,11 +61,18 @@ def guarded(callback: _Handler) -> _Handler:
                 await update.callback_query.answer()
             return
 
-        if chat_id is not None:
-            busy_chats.add(chat_id)
+        if chat_id is None:
+            await callback(update, context)
+            return
+
+        busy_chats.add(chat_id)
+        started = time.monotonic()
         try:
             await callback(update, context)
         finally:
+            remaining = _MIN_BUSY_SECONDS - (time.monotonic() - started)
+            if remaining > 0:
+                await asyncio.sleep(remaining)
             busy_chats.discard(chat_id)
 
     return wrapper  # type: ignore[return-value]
