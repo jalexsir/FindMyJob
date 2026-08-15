@@ -125,7 +125,9 @@ def build_persistent_keyboard(
     "🧹 Очистити листування" — нижній ряд завжди, незалежно від режиму
     ("⚙️ Ще"-підменю прибрано: рідковживана, але одна дія на постійній
     клавіатурі не заважає, а "🧹 Очистити приховані" переїхало в підказку
-    "🔍 Приховані" — див. build_show_hidden_prompt_keyboard).
+    "🔍 Приховані" — див. build_show_hidden_prompt_keyboard). Поруч із нею —
+    "🔄 Обрати категорії" (та сама дія, що й "Переобрати категорії пошуку" в
+    nda_mode, просто окремий короткий підпис для звичайного режиму).
     """
     if nda_mode:
         top_row = [
@@ -140,7 +142,7 @@ def build_persistent_keyboard(
             KeyboardButton(texts.BTN_VAC_7D),
             KeyboardButton(texts.BTN_VAC_ALL),
         ]
-        bottom_row = [KeyboardButton(texts.BTN_CLEAR)]
+        bottom_row = [KeyboardButton(texts.BTN_CHOOSE_CATS), KeyboardButton(texts.BTN_CLEAR)]
 
     return ReplyKeyboardMarkup(
         [
