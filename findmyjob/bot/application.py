@@ -170,7 +170,7 @@ class BotApplication:
             )
 
     def _preload_state(self, application: Application) -> None:
-        """Підвантажує "Вилучені", "Обране" й підписки з БД у bot_data."""
+        """Підвантажує "Приховані", "Обране" й підписки з БД у bot_data."""
         all_hidden = self._store.load_all_hidden()
         all_favorites = self._store.load_all_favorites()
         all_subscriptions = self._store.load_all_subscriptions()

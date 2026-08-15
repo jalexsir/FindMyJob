@@ -124,8 +124,8 @@ def build_persistent_keyboard(
 
     "🧹 Очистити листування" — нижній ряд завжди, незалежно від режиму
     ("⚙️ Ще"-підменю прибрано: рідковживана, але одна дія на постійній
-    клавіатурі не заважає, а "🧹 Очистити вилучені" переїхало в підказку
-    "🔍 Вилучені" — див. build_show_hidden_prompt_keyboard).
+    клавіатурі не заважає, а "🧹 Очистити приховані" переїхало в підказку
+    "🔍 Приховані" — див. build_show_hidden_prompt_keyboard).
     """
     if nda_mode:
         top_row = [
@@ -226,7 +226,7 @@ def build_clear_confirm_keyboard() -> InlineKeyboardMarkup:
 
 
 def build_clear_hidden_confirm_keyboard() -> InlineKeyboardMarkup:
-    """Так/Ні на питання про очищення списку вилучених."""
+    """Так/Ні на питання про очищення списку прихованих."""
     return _yes_no_keyboard(cb.CB_CLEAR_HIDE_YES, cb.CB_CLEAR_HIDE_NO)
 
 
@@ -321,7 +321,7 @@ def build_favorite_vacancy_keyboard(vacancy: Vacancy) -> InlineKeyboardMarkup:
 
 
 def build_restore_keyboard(short_link: str) -> InlineKeyboardMarkup:
-    """Кнопка відновлення для картки зі списку вилучених."""
+    """Кнопка відновлення для картки зі списку прихованих."""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(texts.BTN_RESTORE,
                               callback_data=cb.payload(cb.CB_RESTORE, short_link))],
@@ -337,7 +337,7 @@ def build_unhide_keyboard(short_link: str) -> InlineKeyboardMarkup:
 
 
 def build_show_hidden_prompt_keyboard() -> InlineKeyboardMarkup:
-    """Підтвердження показу списку вилучених + очищення цього ж списку."""
+    """Підтвердження показу списку прихованих + очищення цього ж списку."""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(texts.BTN_CLEAR_HIDE, callback_data=cb.CB_CLEAR_HIDE)],
         [InlineKeyboardButton(texts.BTN_SHOW_HIDDEN_LIST, callback_data=cb.CB_SHOW_HIDDEN)],
@@ -359,7 +359,7 @@ def build_reselect_keyboard() -> InlineKeyboardMarkup:
 
 
 def build_no_vacancies_keyboard() -> InlineKeyboardMarkup:
-    """Клавіатура для "нічого не знайдено": глянути вилучені (спочатку кількість +
+    """Клавіатура для "нічого не знайдено": глянути приховані (спочатку кількість +
     підтвердження) АБО переобрати категорії."""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(texts.BTN_SHOW_HIDDEN_LIST,
