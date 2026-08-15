@@ -26,6 +26,15 @@
 випадкові швидкі повтори (перш ніж людина встигла побачити відповідь), а не
 блокувати свідоме повторне натискання тієї самої кнопки вже ПІСЛЯ того, як
 відповідь на попереднє прийшла — це вже не дублікат, а нова дія користувача.
+
+Окремо від цього — `guard_against_abuse()`: захист від зловживання (шквалу
+запитів), а не від випадкового дубль-кліку. Рахує натискання будь-яких кнопок
+за ковзне вікно `_ABUSE_WINDOW_SECONDS`; якщо їх більше за
+`_ABUSE_MAX_REQUESTS` — чат переходить у режим тайм-ауту: усі кнопки
+ігноруються, доки користувач не натисне «Ок» і не мине ще
+`_ABUSE_LOCKOUT_SECONDS` після цього. На відміну від `guarded()`, тут не
+важливо, чи дії різні (Обране, потім Приховані, потім...) — рахується сам
+факт частоти запитів від чату.
 """
 
 from __future__ import annotations
@@ -33,10 +42,15 @@ from __future__ import annotations
 import asyncio
 import functools
 import time
+from collections import deque
 from typing import Awaitable, Callable, TypeVar
 
 from telegram import Update
 from telegram.ext import ContextTypes
+
+from findmyjob.bot import callbacks as cb
+from findmyjob.bot import texts
+from findmyjob.bot.keyboards import build_abuse_ack_keyboard
 
 _Handler = TypeVar("_Handler", bound=Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]])
 
@@ -84,3 +98,109 @@ def guarded(callback: _Handler) -> _Handler:
             busy_chats.discard(chat_id)
 
     return wrapper  # type: ignore[return-value]
+
+
+# ── Захист від абузу (шквалу запитів) ──────────────────────────────────────
+
+_ABUSE_LOG_KEY = "abuse_request_log"        # dict[chat_id, deque[float]]
+_ABUSE_PENDING_KEY = "abuse_pending_ack"    # set[chat_id]
+_ABUSE_LOCKOUT_KEY = "abuse_lockout_until"  # dict[chat_id, float]
+
+_ABUSE_WINDOW_SECONDS = 10.0
+_ABUSE_MAX_REQUESTS = 10
+_ABUSE_LOCKOUT_SECONDS = 10.0
+
+
+def _chat_id(update: Update) -> int | None:
+    chat = update.effective_chat
+    return chat.id if chat else None
+
+
+def _is_ack(update: Update) -> bool:
+    query = update.callback_query
+    return query is not None and query.data == cb.CB_ABUSE_ACK
+
+
+async def _answer_if_callback(update: Update) -> None:
+    if update.callback_query is not None:
+        # Інакше кнопка в клієнті лишається "у завантаженні" до таймауту.
+        await update.callback_query.answer()
+
+
+def guard_against_abuse(callback: _Handler) -> _Handler:
+    """Обгортає callback обробника: рахує натискання будь-яких кнопок чату за
+    ковзне вікно `_ABUSE_WINDOW_SECONDS`. Якщо їх більше за
+    `_ABUSE_MAX_REQUESTS` — надсилає попередження й переводить чат у режим
+    тайм-ауту: усі кнопки ігноруються, доки користувач не натисне «Ок»
+    (`acknowledge_abuse`) і не мине ще `_ABUSE_LOCKOUT_SECONDS`.
+
+    Кнопка «Ок» — єдиний виняток: вона проходить повз цю перевірку завжди
+    (інакше з активного тайм-ауту не було б як вийти).
+    """
+
+    @functools.wraps(callback)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if _is_ack(update):
+            await callback(update, context)
+            return
+
+        chat_id = _chat_id(update)
+        if chat_id is None:
+            await callback(update, context)
+            return
+
+        lockout_until: dict[int, float] = context.bot_data.setdefault(_ABUSE_LOCKOUT_KEY, {})
+        until = lockout_until.get(chat_id)
+        if until is not None:
+            if time.monotonic() < until:
+                await _answer_if_callback(update)
+                return
+            del lockout_until[chat_id]
+
+        pending: set[int] = context.bot_data.setdefault(_ABUSE_PENDING_KEY, set())
+        if chat_id in pending:
+            await _answer_if_callback(update)
+            return
+
+        log: dict[int, deque[float]] = context.bot_data.setdefault(_ABUSE_LOG_KEY, {})
+        timestamps = log.setdefault(chat_id, deque())
+        now = time.monotonic()
+        timestamps.append(now)
+        while timestamps and now - timestamps[0] > _ABUSE_WINDOW_SECONDS:
+            timestamps.popleft()
+
+        if len(timestamps) > _ABUSE_MAX_REQUESTS:
+            timestamps.clear()
+            pending.add(chat_id)
+            await _answer_if_callback(update)
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=texts.MSG_ABUSE_DETECTED,
+                reply_markup=build_abuse_ack_keyboard(),
+            )
+            return
+
+        await callback(update, context)
+
+    return wrapper  # type: ignore[return-value]
+
+
+async def acknowledge_abuse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обробник кнопки «Ок»: знімає режим очікування підтвердження й запускає
+    фінальний відлік `_ABUSE_LOCKOUT_SECONDS`, протягом якого кнопки й далі
+    ігноруються — навіть повторні натискання самої «Ок».
+    """
+    query = update.callback_query
+    await query.answer()
+
+    chat_id = _chat_id(update)
+    if chat_id is None:
+        return
+
+    pending: set[int] = context.bot_data.setdefault(_ABUSE_PENDING_KEY, set())
+    pending.discard(chat_id)
+
+    lockout_until: dict[int, float] = context.bot_data.setdefault(_ABUSE_LOCKOUT_KEY, {})
+    lockout_until[chat_id] = time.monotonic() + _ABUSE_LOCKOUT_SECONDS
+
+    await query.edit_message_text(texts.MSG_ABUSE_ACK_CONFIRMED)

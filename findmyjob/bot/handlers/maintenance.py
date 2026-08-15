@@ -13,6 +13,7 @@ from findmyjob.bot import texts
 from findmyjob.bot.keyboards import (
     build_clear_confirm_keyboard, build_intro_continue_keyboard, build_reselect_keyboard,
 )
+from findmyjob.bot.throttle import acknowledge_abuse
 
 from .base import HandlerGroup
 
@@ -29,6 +30,8 @@ class MaintenanceHandlers(HandlerGroup):
             CallbackQueryHandler(self.clear_history, pattern=cb.exact(cb.CB_CLEAR)),
             CallbackQueryHandler(self.confirm_clear, pattern=cb.exact(cb.CB_CLEAR_YES)),
             CallbackQueryHandler(self.cancel_clear, pattern=cb.exact(cb.CB_CLEAR_NO)),
+            # Підтвердження захисного тайм-ауту — throttle.guard_against_abuse.
+            CallbackQueryHandler(acknowledge_abuse, pattern=cb.exact(cb.CB_ABUSE_ACK)),
         )
 
     async def clear_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
