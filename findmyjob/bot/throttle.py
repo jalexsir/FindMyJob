@@ -51,6 +51,7 @@ from collections import deque
 from typing import Awaitable, Callable, TypeVar
 
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from findmyjob.bot import texts
@@ -159,7 +160,11 @@ def guard_against_abuse(callback: _Handler) -> _Handler:
             if update.callback_query is not None:
                 await update.callback_query.answer(texts.MSG_ABUSE_DETECTED, show_alert=True)
             else:
-                await context.bot.send_message(chat_id=chat_id, text=texts.MSG_ABUSE_DETECTED)
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=texts.MSG_ABUSE_DETECTED_HTML,
+                    parse_mode=ParseMode.HTML,
+                )
             return
 
         await callback(update, context)
