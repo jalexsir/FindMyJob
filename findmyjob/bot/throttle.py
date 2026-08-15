@@ -37,9 +37,17 @@
 момент показу: Telegram не повідомляє бота, коли користувач закриває такий
 alert (кнопка "Гаразд" — суто локальна дія клієнта), тож підтвердження від
 користувача тут не чекаємо. Для кнопок нижнього меню (reply keyboard, не
-callback query — alert для них технічно неможливий) — звичайне повідомлення
-без кнопки. На відміну від `guarded()`, тут не важливо, чи дії різні (Обране,
-потім Приховані, потім...) — рахується сам факт частоти запитів від чату.
+callback query — alert для них технічно неможливий) — виділене жирним
+повідомлення в чаті. На відміну від `guarded()`, тут не важливо, чи дії різні
+(Обране, потім Приховані, потім...) — рахується сам факт частоти запитів від
+чату.
+
+Кнопка нижнього меню — це завжди справжнє текстове повідомлення від
+користувача (Telegram надсилає його незалежно від того, реагує бот чи ні),
+тож просто ігнорувати натискання недостатньо: у чаті лишалась би стрічка
+дублікатів тексту кнопки. Тому кожне ігнороване натискання під час
+тайм-ауту (`_hide_trace`) видаляє це повідомлення — бот може видаляти вхідні
+повідомлення в приватних чатах.
 """
 
 from __future__ import annotations
@@ -119,10 +127,24 @@ def _chat_id(update: Update) -> int | None:
     return chat.id if chat else None
 
 
-async def _answer_if_callback(update: Update) -> None:
+async def _hide_trace(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Приховує слід ігнорованого натискання. Для inline-кнопки досить
+    зняти індикатор завантаження — інакше лишається "у завантаженні" до
+    таймауту. Для кнопки нижнього меню Telegram завжди надсилає в чат
+    справжнє текстове повідомлення від користувача на кожен тап — його
+    видаляємо (бот може видаляти вхідні повідомлення в приватних чатах),
+    щоб під час тайм-ауту в чаті не накопичувалась стрічка дублікатів.
+    """
     if update.callback_query is not None:
-        # Інакше кнопка в клієнті лишається "у завантаженні" до таймауту.
         await update.callback_query.answer()
+        return
+    if update.message is not None:
+        try:
+            await context.bot.delete_message(
+                chat_id=update.message.chat_id, message_id=update.message.message_id
+            )
+        except Exception:
+            pass
 
 
 def guard_against_abuse(callback: _Handler) -> _Handler:
@@ -143,7 +165,7 @@ def guard_against_abuse(callback: _Handler) -> _Handler:
         until = lockout_until.get(chat_id)
         if until is not None:
             if time.monotonic() < until:
-                await _answer_if_callback(update)
+                await _hide_trace(update, context)
                 return
             del lockout_until[chat_id]
 
@@ -160,6 +182,7 @@ def guard_against_abuse(callback: _Handler) -> _Handler:
             if update.callback_query is not None:
                 await update.callback_query.answer(texts.MSG_ABUSE_DETECTED, show_alert=True)
             else:
+                await _hide_trace(update, context)
                 await context.bot.send_message(
                     chat_id=chat_id,
                     text=texts.MSG_ABUSE_DETECTED_HTML,
