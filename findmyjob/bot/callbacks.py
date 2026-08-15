@@ -40,7 +40,6 @@ CB_NDA_SHOW_ALL_YES = "nda_all_yes"
 CB_NDA_SHOW_ALL_NO = "nda_all_no"
 CB_NDA_BASELINE_YES = "nda_baseline_yes"
 CB_NDA_BASELINE_NO = "nda_baseline_no"
-CB_ABUSE_ACK = "abuse_ack"  # підтвердження тайм-ауту після виявленого абузу
 
 # Дії з параметром — префікси, до яких дописується значення
 CB_CONFIRM_YES = "confirm_yes:"

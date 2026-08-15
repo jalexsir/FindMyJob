@@ -360,13 +360,6 @@ def build_reselect_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def build_abuse_ack_keyboard() -> InlineKeyboardMarkup:
-    """Єдина кнопка «Ок» — підтвердження захисного тайм-ауту після абузу."""
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(texts.BTN_ABUSE_ACK, callback_data=cb.CB_ABUSE_ACK)],
-    ])
-
-
 def build_no_vacancies_keyboard() -> InlineKeyboardMarkup:
     """Клавіатура для "нічого не знайдено": глянути приховані (спочатку кількість +
     підтвердження) АБО переобрати категорії."""
