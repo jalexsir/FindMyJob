@@ -19,11 +19,16 @@ BTN_NDA_UPDATE_BASELINE = "🔄 Оновити еталон"
 # Той самий підпис, що й серед інлайн-кнопок нижче — у nda_mode це кнопка
 # постійної клавіатури (єдиний вихід із NDA-режиму), деінде — інлайн.
 BTN_RESELECT_CATS = "🔄 Переобрати категорії пошуку"
+# Та сама дія (CategoryHandlers.reselect_from_menu), що й BTN_RESELECT_CATS,
+# але у звичайному (не nda_mode) нижньому ряду — окремий, коротший підпис,
+# бо тут це не "єдиний вихід" із режиму, а рядова дія поруч з очищенням.
+BTN_CHOOSE_CATS = "🔄 Обрати категорії"
 
 ALL_BUTTON_TEXTS = (
     BTN_VAC_1D, BTN_VAC_7D, BTN_VAC_ALL,
     BTN_SHOW_HIDDEN, BTN_FAVORITES, BTN_NOTIFICATIONS, BTN_CLEAR,
     BTN_NDA_SHOW_NEW, BTN_NDA_SHOW_ALL, BTN_NDA_UPDATE_BASELINE, BTN_RESELECT_CATS,
+    BTN_CHOOSE_CATS,
 )
 
 # ── Підписи інлайн-кнопок ─────────────────────────────────────────────────────

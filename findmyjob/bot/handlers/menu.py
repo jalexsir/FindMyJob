@@ -60,6 +60,7 @@ class MenuHandlers(HandlerGroup):
             texts.BTN_NDA_SHOW_ALL: nda_actions.show_all,
             texts.BTN_NDA_UPDATE_BASELINE: nda_actions.prompt_update_baseline,
             texts.BTN_RESELECT_CATS: categories.reselect_from_menu,
+            texts.BTN_CHOOSE_CATS: categories.reselect_from_menu,
         }
         self._maintenance = maintenance
 
