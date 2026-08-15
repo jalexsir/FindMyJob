@@ -9,7 +9,9 @@ from telegram import Update
 from telegram.ext import BaseHandler, ContextTypes, MessageHandler, filters
 
 from findmyjob.bot import texts
+from findmyjob.bot.keyboards import build_persistent_keyboard
 from findmyjob.bot.state import StateRepository
+from findmyjob.feeds import NDA_CATEGORY
 
 from .base import HandlerGroup
 from .categories import CategoryHandlers
@@ -42,8 +44,10 @@ class MenuHandlers(HandlerGroup):
         maintenance: MaintenanceHandlers,
         nda_actions: NdaActionHandlers,
         categories: CategoryHandlers,
+        admin_user_id: int | None = None,
     ) -> None:
         super().__init__(states)
+        self._admin_user_id = admin_user_id
         self._routes: dict[str, MenuAction] = {
             texts.BTN_VAC_1D: lambda u, c: vacancies.request_from_message(u, c, days=1),
             texts.BTN_VAC_7D: lambda u, c: vacancies.request_from_message(u, c, days=7),
@@ -69,7 +73,7 @@ class MenuHandlers(HandlerGroup):
         # (обробник у групі спрацьовує лише один, перший, що збігся).
         return (
             MessageHandler(filters.TEXT & filters.Regex(_MENU_PATTERN), self.handle),
-            MessageHandler(filters.ALL, self._maintenance.track_user_message),
+            MessageHandler(filters.ALL, self._reject_unrecognized),
         )
 
     async def handle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -77,3 +81,33 @@ class MenuHandlers(HandlerGroup):
         action = self._routes.get(update.message.text)
         if action is not None:
             await action(update, context)
+
+    async def _reject_unrecognized(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Усе, що не збіглося з жодною кнопкою чи командою: довільний
+        текст, стікери, фото тощо. Навмисний "глухий кут" для ручного
+        вводу — бот не намагається інтерпретувати команди, яких немає в
+        меню, лише нагадує про кнопки й відновлює клавіатуру (раптом
+        користувач її згорнув — reply_markup на новому повідомленні
+        показує її знову)."""
+        await self._maintenance.track_user_message(update, context)
+        if update.message is None:
+            return
+
+        nda_mode = self.user_state(update, context).categories == [NDA_CATEGORY]
+        message = await update.message.reply_text(
+            texts.MSG_USE_MENU_BUTTONS,
+            reply_markup=build_persistent_keyboard(
+                nda_mode=nda_mode, is_admin=self._is_admin(update)
+            ),
+        )
+        self.session(update, context).track(message.message_id)
+
+    def _is_admin(self, update: Update) -> bool:
+        user = update.effective_user
+        return (
+            user is not None
+            and self._admin_user_id is not None
+            and user.id == self._admin_user_id
+        )
