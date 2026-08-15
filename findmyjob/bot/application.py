@@ -19,7 +19,7 @@ from findmyjob.bot.sending import VacancySender
 from findmyjob.bot.state import (
     StateRepository, favorites_key, hidden_key, notifications_key,
 )
-from findmyjob.bot.throttle import guarded
+from findmyjob.bot.throttle import guard_against_abuse, guarded
 from findmyjob.config import Settings
 from findmyjob.feeds import FeedFetcher, VacancyFeedService
 from findmyjob.images import VacancyImageRenderer
@@ -96,7 +96,7 @@ class BotApplication:
 
         for group in self._groups:
             for handler in group.handlers():
-                handler.callback = guarded(handler.callback)
+                handler.callback = guard_against_abuse(guarded(handler.callback))
                 application.add_handler(handler)
 
         self._schedule_jobs(application)
