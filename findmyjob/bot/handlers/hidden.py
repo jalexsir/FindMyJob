@@ -198,8 +198,16 @@ class HiddenHandlers(HandlerGroup):
         await self.clear_all(query.message.chat, update, context)
 
     async def clear_all(self, chat, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Крок 1: кількість прихованих + питання Так/Ні, без самого видалення."""
-        count = len(self.user_state(update, context).hidden)
+        """Крок 1: кількість прихованих у ОБРАНИХ ЗАРАЗ категоріях + питання
+        Так/Ні, без самого видалення.
+
+        Той самий фільтр, що й у send_prompt/send_list: список міг
+        накопичитись, поки були обрані інші категорії, тож і рахувати, і
+        згодом видаляти має саме те, що людина зараз бачить, а не взагалі
+        все приховане.
+        """
+        hidden = self._hidden_for_current_categories(update, context)
+        count = len(hidden)
         if not count:
             message = await chat.send_message(texts.MSG_HIDDEN_ALREADY_EMPTY)
             self.session(update, context).track(message.message_id)
@@ -214,13 +222,20 @@ class HiddenHandlers(HandlerGroup):
         self.session(update, context).track(message.message_id)
 
     async def confirm_clear(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Крок 2 «Так»: власне очищення — текст той самий, що й раніше."""
+        """Крок 2 «Так»: видаляє лише приховані обраних зараз категорій —
+        решту (інші категорії) лишає незмінною."""
         query = update.callback_query
         await query.answer()
 
         state = self.user_state(update, context)
-        count = len(state.hidden)
-        state.save_hidden({})
+        to_remove = self._hidden_for_current_categories(update, context)
+        count = len(to_remove)
+        remaining = {
+            short_link: entry
+            for short_link, entry in state.hidden.items()
+            if short_link not in to_remove
+        }
+        state.save_hidden(remaining)
         await query.edit_message_text(f"✅ Список прихованих вакансій очищений ({count})")
 
     async def cancel_clear(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
