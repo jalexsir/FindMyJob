@@ -1,4 +1,4 @@
-"""Сценарій "Вилучені з пошуку": приховати, відновити, переглянути, очистити."""
+"""Сценарій "Приховані з пошуку": приховати, відновити, переглянути, очистити."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from .base import HandlerGroup, title_from_caption
 
 
 class HiddenHandlers(HandlerGroup):
-    """Керування списком вилучених вакансій."""
+    """Керування списком прихованих вакансій."""
 
     def __init__(
         self,
@@ -122,7 +122,7 @@ class HiddenHandlers(HandlerGroup):
         )
 
     async def restore(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Відновлення зі списку вилучених — картка лишається, зникає лише кнопка."""
+        """Відновлення зі списку прихованих — картка лишається, зникає лише кнопка."""
         query = update.callback_query
         await query.answer(texts.MSG_RESTORED)
 
@@ -158,14 +158,14 @@ class HiddenHandlers(HandlerGroup):
 
         count = len(hidden)
         message = await chat.send_message(
-            f"🙈 <b>У списку вилучених — {count} {texts.vacancies_word(count)}.</b>",
+            f"🙈 <b>У списку прихованих — {count} {texts.vacancies_word(count)}.</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=build_show_hidden_prompt_keyboard(),
         )
         session.track(message.message_id)
 
     async def send_list(self, chat, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Крок 2: власне картки вилучених вакансій (після підтвердження)."""
+        """Крок 2: власне картки прихованих вакансій (після підтвердження)."""
         session = self.session(update, context)
         hidden = self._hidden_for_current_categories(update, context)
         if not hidden:
@@ -174,7 +174,7 @@ class HiddenHandlers(HandlerGroup):
             return
 
         header = await chat.send_message(
-            f"🙈 <b>Вилучені вакансії ({len(hidden)}):</b>", parse_mode=ParseMode.HTML
+            f"🙈 <b>Приховані вакансії ({len(hidden)}):</b>", parse_mode=ParseMode.HTML
         )
         session.track(header.message_id)
 
@@ -198,7 +198,7 @@ class HiddenHandlers(HandlerGroup):
         await self.clear_all(query.message.chat, update, context)
 
     async def clear_all(self, chat, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Крок 1: кількість вилучених + питання Так/Ні, без самого видалення."""
+        """Крок 1: кількість прихованих + питання Так/Ні, без самого видалення."""
         count = len(self.user_state(update, context).hidden)
         if not count:
             message = await chat.send_message(texts.MSG_HIDDEN_ALREADY_EMPTY)
@@ -206,7 +206,7 @@ class HiddenHandlers(HandlerGroup):
             return
 
         message = await chat.send_message(
-            f"🙈 <b>У списку вилучених — {count} {texts.vacancies_word(count)}.</b>"
+            f"🙈 <b>У списку прихованих — {count} {texts.vacancies_word(count)}.</b>"
             "\n\n❓ Очистити список?",
             parse_mode=ParseMode.HTML,
             reply_markup=build_clear_hidden_confirm_keyboard(),
@@ -221,7 +221,7 @@ class HiddenHandlers(HandlerGroup):
         state = self.user_state(update, context)
         count = len(state.hidden)
         state.save_hidden({})
-        await query.edit_message_text(f"✅ Список вилучених вакансій очищений ({count})")
+        await query.edit_message_text(f"✅ Список прихованих вакансій очищений ({count})")
 
     async def cancel_clear(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Крок 2 «Ні»: список цілий, пропонуємо переобрати категорії пошуку."""

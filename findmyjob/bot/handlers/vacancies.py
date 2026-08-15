@@ -216,7 +216,7 @@ class VacancyHandlers(HandlerGroup):
         status: Reporter | None = None,
         dedup_status: Reporter | None = None,
     ) -> VacancySelection:
-        """Фетчить вакансії, прибирає вилучені, впорядковує та кладе в сесію."""
+        """Фетчить вакансії, прибирає приховані, впорядковує та кладе в сесію."""
         state = self.user_state(update, context)
         categories = state.categories or None
         sources = await self._fetch(categories, days, report, status, dedup_status)
@@ -233,7 +233,7 @@ class VacancyHandlers(HandlerGroup):
         )
 
     def _remove_hidden(self, sources, state: UserState) -> int:
-        """Вилучає приховані вакансії з вибірки. Повертає кількість вилучених.
+        """Вилучає приховані вакансії з вибірки. Повертає кількість прихованих.
 
         Рахуємо саме УНІКАЛЬНІ вакансії (за short_link), а не скільки разів вони
         трапилися у фетчі: та сама вакансія може знайтися одразу в кількох

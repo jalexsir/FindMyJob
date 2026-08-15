@@ -4,7 +4,7 @@
 в ньому розкладено по per-user ключах. Ці класи — єдине місце, де ці ключі
 формуються: решта коду працює з іменованими властивостями.
 
-Персистентність точкова: у SQLite їдуть лише "Вилучені" та "Обране". Кеш
+Персистентність точкова: у SQLite їдуть лише "Приховані" та "Обране". Кеш
 показаних вакансій, seen-хеші й обрані категорії живуть тільки в пам'яті процесу
 і скидаються при перезапуску.
 """
@@ -39,7 +39,7 @@ def notifications_key(user_id: int) -> str:
 
 
 class UserState:
-    """Дані одного користувача: вилучені, обране, переглянуте, категорії."""
+    """Дані одного користувача: приховані, обране, переглянуте, категорії."""
 
     def __init__(self, bot_data: dict[str, Any], user_id: int, store: VacancyStore) -> None:
         self._bot_data = bot_data
@@ -50,7 +50,7 @@ class UserState:
     def user_id(self) -> int:
         return self._user_id
 
-    # ── Вилучені з пошуку ────────────────────────────────────────────────────
+    # ── Приховані з пошуку ────────────────────────────────────────────────────
 
     @property
     def hidden(self) -> dict[str, dict]:
@@ -58,13 +58,13 @@ class UserState:
         return self._bot_data.setdefault(hidden_key(self._user_id), {})
 
     def save_hidden(self, data: dict[str, dict] | None = None) -> None:
-        """Записує вилучені в bot_data і в БД. Без аргументу — зберігає поточні."""
+        """Записує приховані в bot_data і в БД. Без аргументу — зберігає поточні."""
         if data is not None:
             self._bot_data[hidden_key(self._user_id)] = data
         self._store.replace_hidden(self._user_id, self.hidden)
 
     def hidden_for_categories(self, categories: list[str]) -> dict[str, dict]:
-        """Вилучені лише обраних зараз категорій.
+        """Приховані лише обраних зараз категорій.
 
         Глобальний список міг накопичитись, поки були обрані інші категорії —
         показувати його цілком було б несподівано.

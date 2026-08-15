@@ -88,7 +88,7 @@ def build_summary(sources: list[MergedSource], days: int | None, hidden_count: i
     """Зведення по джерелах.
 
     `sources` — вакансії ПІСЛЯ вилучення прихованих (тобто доступні до перегляду).
-    `hidden_count` — скільки з поточної вибірки збігається зі списком вилучених.
+    `hidden_count` — скільки з поточної вибірки збігається зі списком прихованих.
     """
     available = sum(len(source.vacancies) for source in sources)
     total_found = available + hidden_count
@@ -99,7 +99,7 @@ def build_summary(sources: list[MergedSource], days: int | None, hidden_count: i
     )
     if hidden_count:
         header = (
-            f"{header}, з них - {hidden_count} в списку вилучених.\n"
+            f"{header}, з них - {hidden_count} в списку прихованих.\n"
             f"До перегляду доступно {available} {vacancies_word(available)}:"
         )
     else:
