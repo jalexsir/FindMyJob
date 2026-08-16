@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from telegram.ext import Application
 
 from findmyjob.bot.changelog import broadcast_update_to_users
+from findmyjob.bot.error_handling import log_error
 from findmyjob.bot.handlers import (
     CategoryHandlers, FavoriteHandlers, HandlerGroup, HiddenHandlers,
     MaintenanceHandlers, MenuHandlers, NdaActionHandlers, NotificationHandlers,
@@ -89,6 +90,7 @@ class BotApplication:
             Application.builder().token(self._settings.bot_token)
             .concurrent_updates(True).post_init(self._broadcast_update_to_users).build()
         )
+        application.add_error_handler(log_error)
 
         self._store.init_db()
         self._backfill_known_users()
