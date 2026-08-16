@@ -28,13 +28,19 @@ from findmyjob.storage import VacancyStore
 
 logger = logging.getLogger(__name__)
 
-# Сповіщення: щогодини з 8:00 до 20:00 за київським часом
+# Сповіщення: щогодини з 8:00 до 20:00 за київським часом — лише в будні.
 NOTIFICATIONS_TIMEZONE = "Europe/Kyiv"
 NOTIFICATIONS_FROM_HOUR = 8
 NOTIFICATIONS_TO_HOUR = 20
 
-# Сповіщення NDA-All: окремий шкедулер, лише тричі на день — не щогодини, бо
-# дедуп тут не персональний, а через один спільний знімок (nda_notifier.py).
+# У вихідні (субота, неділя) — обидва види сповіщень лише раз на день, о 17:00,
+# замість звичайного розкладу.
+WEEKDAY_DAYS = "mon-fri"
+WEEKEND_DAYS = "sat,sun"
+WEEKEND_HOUR = 17
+
+# Сповіщення NDA-All: окремий шкедулер, у будні — тричі на день, не щогодини,
+# бо дедуп тут не персональний, а через один спільний знімок (nda_notifier.py).
 NDA_NOTIFICATIONS_HOURS = "10,14,20"
 
 
@@ -110,10 +116,15 @@ class BotApplication:
         await broadcast_update_to_users(application.bot, self._store)
 
     def _schedule_jobs(self, application: Application) -> None:
-        """Погодинна розсилка сповіщень і нічне прибирання журналу.
+        """Розсилка сповіщень (будні/вихідні — різний розклад) і нічне
+        прибирання журналу.
 
         Часовий пояс задається явно: сервер живе в UTC, і без цього «8 ранку»
         перетворилося б на 11:00 за Києвом.
+
+        Будні й вихідні — окремі cron-завдання (а не один запис): у cron усі
+        поля поєднуються через "І", тож "будні щогодини АБО вихідні о 17:00"
+        не виразити одним правилом — тільки двома незалежними.
         """
         job_queue = application.job_queue
         if job_queue is None:
@@ -128,11 +139,23 @@ class BotApplication:
             self._notifier.run,
             job_kwargs={
                 "trigger": "cron",
+                "day_of_week": WEEKDAY_DAYS,
                 "hour": f"{NOTIFICATIONS_FROM_HOUR}-{NOTIFICATIONS_TO_HOUR}",
                 "minute": 0,
                 "timezone": timezone,
             },
-            name="notifications",
+            name="notifications-weekday",
+        )
+        job_queue.run_custom(
+            self._notifier.run,
+            job_kwargs={
+                "trigger": "cron",
+                "day_of_week": WEEKEND_DAYS,
+                "hour": WEEKEND_HOUR,
+                "minute": 0,
+                "timezone": timezone,
+            },
+            name="notifications-weekend",
         )
         job_queue.run_custom(
             self._notifier.purge,
@@ -142,15 +165,26 @@ class BotApplication:
         job_queue.run_custom(
             self._nda_notifier.run,
             job_kwargs={
-                "trigger": "cron", "hour": NDA_NOTIFICATIONS_HOURS, "minute": 0,
+                "trigger": "cron", "day_of_week": WEEKDAY_DAYS,
+                "hour": NDA_NOTIFICATIONS_HOURS, "minute": 0,
                 "timezone": timezone,
             },
-            name="nda-notifications",
+            name="nda-notifications-weekday",
+        )
+        job_queue.run_custom(
+            self._nda_notifier.run,
+            job_kwargs={
+                "trigger": "cron", "day_of_week": WEEKEND_DAYS,
+                "hour": WEEKEND_HOUR, "minute": 0,
+                "timezone": timezone,
+            },
+            name="nda-notifications-weekend",
         )
         logger.info(
-            "Сповіщення заплановано: щогодини %d:00–%d:00, NDA-All — %s (%s)",
+            "Сповіщення заплановано: будні — щогодини %d:00–%d:00 (NDA-All — %s), "
+            "вихідні — раз о %d:00 (%s)",
             NOTIFICATIONS_FROM_HOUR, NOTIFICATIONS_TO_HOUR, NDA_NOTIFICATIONS_HOURS,
-            NOTIFICATIONS_TIMEZONE,
+            WEEKEND_HOUR, NOTIFICATIONS_TIMEZONE,
         )
 
     def run(self) -> None:
