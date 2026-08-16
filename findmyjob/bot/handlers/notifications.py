@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Sequence
 
 from telegram import Update
@@ -23,6 +24,8 @@ from findmyjob.bot.keyboards import (
 )
 
 from .base import HandlerGroup, render_category_selection
+
+logger = logging.getLogger(__name__)
 
 
 class NotificationHandlers(HandlerGroup):
@@ -117,6 +120,11 @@ class NotificationHandlers(HandlerGroup):
         await query.answer()
         self.user_state(update, context).subscribe_notifications(
             query.message.chat_id, draft
+        )
+        user = update.effective_user
+        logger.info(
+            "[СПОВІЩЕННЯ] Користувач %s обрав категорії %s для нотифікації",
+            user.id if user else None, ", ".join(draft),
         )
         session.clear_notify_draft()
         await query.edit_message_text(
