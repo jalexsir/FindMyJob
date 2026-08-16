@@ -29,6 +29,10 @@ MAX_SELECTED_CATEGORIES = 6
 # знімку незалежно від інших категорій користувача, тож поєднувати можна.
 DISPLAY_CATEGORIES = AVAILABLE_CATEGORIES + [NDA_CATEGORY]
 
+# Тимчасово доступні лише адміну — забагато вакансій не по темі, спам у
+# результатах пошуку/сповіщень для решти користувачів.
+ADMIN_ONLY_CATEGORIES = frozenset({"Java", "Kotlin"})
+
 
 @dataclass(frozen=True)
 class CategoryFlow:
@@ -158,17 +162,24 @@ def build_persistent_keyboard(
 
 
 def build_category_keyboard(
-    selected: list[str], page: int = 0, flow: CategoryFlow = SEARCH_FLOW
+    selected: list[str], page: int = 0, flow: CategoryFlow = SEARCH_FLOW,
+    is_admin: bool = False,
 ) -> InlineKeyboardMarkup:
     """Клавіатура вибору категорій із пагінацією.
 
     Позначки (✅/⬜) зберігаються при переході між сторінками, бо стан вибору не
-    залежить від поточної сторінки.
+    залежить від поточної сторінки. `ADMIN_ONLY_CATEGORIES` показуються лише
+    коли `is_admin=True` — решті користувачів ці категорії взагалі не
+    пропонуються для вибору.
     """
-    total_pages = max(1, -(-len(flow.categories) // CATEGORIES_PER_PAGE))
+    categories = (
+        flow.categories if is_admin
+        else [c for c in flow.categories if c not in ADMIN_ONLY_CATEGORIES]
+    )
+    total_pages = max(1, -(-len(categories) // CATEGORIES_PER_PAGE))
     page = max(0, min(page, total_pages - 1))
     start = page * CATEGORIES_PER_PAGE
-    page_categories = flow.categories[start:start + CATEGORIES_PER_PAGE]
+    page_categories = categories[start:start + CATEGORIES_PER_PAGE]
 
     rows = [
         [

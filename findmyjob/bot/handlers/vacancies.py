@@ -74,8 +74,9 @@ class VacancyHandlers(HandlerGroup):
         feeds: VacancyFeedService,
         sender: VacancySender,
         max_per_source: int,
+        admin_user_id: int | None = None,
     ) -> None:
-        super().__init__(states)
+        super().__init__(states, admin_user_id)
         self._feeds = feeds
         self._sender = sender
         self._max_per_source = max_per_source
@@ -135,7 +136,8 @@ class VacancyHandlers(HandlerGroup):
         if not self.user_state(update, context).categories:
             session.category_page = 0
             await query.edit_message_text(
-                texts.MSG_NO_CATEGORY_SELECTED, reply_markup=build_category_keyboard([])
+                texts.MSG_NO_CATEGORY_SELECTED,
+                reply_markup=build_category_keyboard([], is_admin=self._is_admin(update)),
             )
             return
 
@@ -156,7 +158,8 @@ class VacancyHandlers(HandlerGroup):
         session = self.session(update, context)
         session.category_page = 0
         message = await reply(
-            texts.MSG_NO_CATEGORY_SELECTED, reply_markup=build_category_keyboard([])
+            texts.MSG_NO_CATEGORY_SELECTED,
+            reply_markup=build_category_keyboard([], is_admin=self._is_admin(update)),
         )
         session.track(message.message_id)
 

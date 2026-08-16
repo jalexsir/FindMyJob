@@ -54,11 +54,12 @@ class BotApplication:
         sender = VacancySender(images)
 
         vacancies = VacancyHandlers(
-            self._states, feeds, sender, settings.max_vacancies_per_source
+            self._states, feeds, sender, settings.max_vacancies_per_source,
+            settings.admin_user_id,
         )
         hidden = HiddenHandlers(self._states, feeds, images)
         favorites = FavoriteHandlers(self._states, feeds, sender)
-        notifications = NotificationHandlers(self._states)
+        notifications = NotificationHandlers(self._states, settings.admin_user_id)
         maintenance = MaintenanceHandlers(self._states)
         nda_actions = NdaActionHandlers(self._states, sender, settings.admin_user_id)
         categories = CategoryHandlers(self._states, settings.admin_user_id)

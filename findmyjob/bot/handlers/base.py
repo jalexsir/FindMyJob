@@ -19,8 +19,9 @@ TITLE_CAPTION_MARKER = "Спеціальність:"
 class HandlerGroup(ABC):
     """Група обробників, згрупованих за сценарієм користувача."""
 
-    def __init__(self, states: StateRepository) -> None:
+    def __init__(self, states: StateRepository, admin_user_id: int | None = None) -> None:
         self._states = states
+        self._admin_user_id = admin_user_id
 
     @abstractmethod
     def handlers(self) -> Sequence[BaseHandler]:
@@ -35,6 +36,14 @@ class HandlerGroup(ABC):
     def session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> ChatSession:
         return self._states.chat(update, context)
 
+    def _is_admin(self, update: Update) -> bool:
+        user = update.effective_user
+        return (
+            user is not None
+            and self._admin_user_id is not None
+            and user.id == self._admin_user_id
+        )
+
 
 async def render_category_selection(
     query,
@@ -42,6 +51,7 @@ async def render_category_selection(
     page: int,
     status_text: Callable[[list[str]], str],
     flow: CategoryFlow = SEARCH_FLOW,
+    is_admin: bool = False,
 ) -> None:
     """Перемальовує повідомлення вибору категорій: текст стану + клавіатура.
 
@@ -52,7 +62,7 @@ async def render_category_selection(
     await query.edit_message_text(
         status_text(selected),
         parse_mode=ParseMode.HTML,
-        reply_markup=build_category_keyboard(selected, page, flow),
+        reply_markup=build_category_keyboard(selected, page, flow, is_admin),
     )
 
 

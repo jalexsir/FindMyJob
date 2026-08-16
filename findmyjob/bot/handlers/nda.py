@@ -34,9 +34,8 @@ class NdaActionHandlers(HandlerGroup):
     def __init__(
         self, states: StateRepository, sender: VacancySender, admin_user_id: int | None
     ) -> None:
-        super().__init__(states)
+        super().__init__(states, admin_user_id)
         self._sender = sender
-        self._admin_user_id = admin_user_id
 
     def handlers(self) -> Sequence[BaseHandler]:
         return (
@@ -50,14 +49,6 @@ class NdaActionHandlers(HandlerGroup):
             CallbackQueryHandler(
                 self.cancel_baseline_update, pattern=cb.exact(cb.CB_NDA_BASELINE_NO)
             ),
-        )
-
-    def is_admin(self, update: Update) -> bool:
-        user = update.effective_user
-        return (
-            user is not None
-            and self._admin_user_id is not None
-            and user.id == self._admin_user_id
         )
 
     # ── Показати нові (дифф проти еталону) ───────────────────────────────────
@@ -147,7 +138,7 @@ class NdaActionHandlers(HandlerGroup):
     async def prompt_update_baseline(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        if not self.is_admin(update):
+        if not self._is_admin(update):
             return
         session = self.session(update, context)
         message = await update.message.reply_text(
@@ -160,7 +151,7 @@ class NdaActionHandlers(HandlerGroup):
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         query = update.callback_query
-        if not self.is_admin(update):
+        if not self._is_admin(update):
             await query.answer()
             return
         await query.answer()
@@ -193,6 +184,7 @@ class NdaActionHandlers(HandlerGroup):
         session = self.session(update, context)
         session.category_page = 0
         message = await update.message.reply_text(
-            texts.MSG_NO_CATEGORY_SELECTED, reply_markup=build_category_keyboard([])
+            texts.MSG_NO_CATEGORY_SELECTED,
+            reply_markup=build_category_keyboard([], is_admin=self._is_admin(update)),
         )
         session.track(message.message_id)
