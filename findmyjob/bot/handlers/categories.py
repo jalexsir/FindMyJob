@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Sequence
 
 from telegram import Update
@@ -69,6 +70,10 @@ class CategoryHandlers(HandlerGroup):
         logger.info(
             "[КОРИСТУВАЧІ] новий користувач %s. Усього унікальних: %d. Список: %s",
             user.id, len(user_ids), ", ".join(str(uid) for uid in user_ids),
+        )
+        logger.info(
+            "[КОРИСТУВАЧІ] Новий користувач [%s] приєднався до чат боту (%s)",
+            user.id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         )
 
     async def continue_intro(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
