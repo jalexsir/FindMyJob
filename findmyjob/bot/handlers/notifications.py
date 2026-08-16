@@ -77,7 +77,8 @@ class NotificationHandlers(HandlerGroup):
         session = self.session(update, context)
         session.category_page = 0
         session.notify_draft = list(self.user_state(update, context).notification_categories)
-        await self._render(query, session.notify_draft, 0, self._is_admin(update))
+        had_prior = bool(session.notify_draft)
+        await self._render(query, session.notify_draft, 0, self._is_admin(update), had_prior)
 
     async def toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """NDA-All тут — звичайна категорія в межах тієї ж квоти в 5, без
@@ -95,7 +96,8 @@ class NotificationHandlers(HandlerGroup):
 
         await query.answer()
         session.notify_draft = draft
-        await self._render(query, draft, session.category_page, self._is_admin(update))
+        had_prior = bool(self.user_state(update, context).notification_categories)
+        await self._render(query, draft, session.category_page, self._is_admin(update), had_prior)
 
     async def reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Знімає весь поточний вибір (чернетку) одним натисканням."""
@@ -104,7 +106,8 @@ class NotificationHandlers(HandlerGroup):
 
         session = self.session(update, context)
         session.notify_draft = []
-        await self._render(query, [], session.category_page, self._is_admin(update))
+        had_prior = bool(self.user_state(update, context).notification_categories)
+        await self._render(query, [], session.category_page, self._is_admin(update), had_prior)
 
     async def change_page(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -113,7 +116,8 @@ class NotificationHandlers(HandlerGroup):
         session = self.session(update, context)
         page = int(cb.argument(query.data, cb.CB_NOTIFY_PAGE))
         session.category_page = page
-        await self._render(query, session.notify_draft, page, self._is_admin(update))
+        had_prior = bool(self.user_state(update, context).notification_categories)
+        await self._render(query, session.notify_draft, page, self._is_admin(update), had_prior)
 
     async def confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Зберігає підписку — тільки тут вона потрапляє в БД."""
@@ -173,7 +177,15 @@ class NotificationHandlers(HandlerGroup):
         )
 
     @staticmethod
-    async def _render(query, draft: list[str], page: int, is_admin: bool) -> None:
+    async def _render(
+        query, draft: list[str], page: int, is_admin: bool, had_prior: bool
+    ) -> None:
+        """`had_prior` — чи була підписка ще ДО відкриття цього екрана (а не
+        поточний стан чернетки): визначає "Додати сповіщення" чи "Оновити
+        сповіщення" на кнопці підтвердження й у підказці над клавіатурою."""
+        confirm_label = texts.BTN_NOTIFY_UPDATE if had_prior else texts.BTN_NOTIFY_ADD
         await render_category_selection(
-            query, draft, page, texts.notifications_status, NOTIFY_FLOW, is_admin
+            query, draft, page,
+            lambda selected: texts.notifications_status(selected, had_prior),
+            NOTIFY_FLOW, is_admin, confirm_label,
         )

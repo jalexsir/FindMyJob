@@ -44,6 +44,11 @@ BTN_SHOW_HIDDEN_LIST = "🔍 Показати приховані вакансі�
 BTN_RESET_CATEGORIES = "🗑 Скинути обрані категорії"
 BTN_NOTIFY_SETUP = "⚙️ Налаштувати сповіщення"
 BTN_NOTIFY_OFF = "🔕 Вимкнути сповіщення"
+# "Додати" — якщо в юзера ще не було підписки на момент відкриття вибору
+# категорій; "Оновити" — якщо вже була (навіть якщо зараз усе скинуто чи
+# перевибрано). Див. notifications.py::_render.
+BTN_NOTIFY_ADD = "🔔 Додати сповіщення"
+BTN_NOTIFY_UPDATE = "🔔 Оновити сповіщення"
 BTN_YES = "✅ Так"
 BTN_NO = "❌ Ні"
 BTN_CONTINUE = "▶️ Продовжити"
@@ -195,13 +200,19 @@ def categories_confirmed(selected: list[str]) -> str:
     return f"✅ Категорії обрано: <b>{', '.join(selected)}</b>\n\nМеню доступне внизу 👇"
 
 
-def notifications_status(selected: list[str]) -> str:
-    """Текст над клавіатурою вибору категорій для сповіщень."""
+def notifications_status(selected: list[str], had_prior: bool = False) -> str:
+    """Текст над клавіатурою вибору категорій для сповіщень.
+
+    `had_prior` — чи була в юзера підписка ще до відкриття цього екрана
+    (див. BTN_NOTIFY_ADD/BTN_NOTIFY_UPDATE) — підказка має збігатись із
+    підписом кнопки нижче.
+    """
     if not selected:
         return MSG_NOTIFY_PICK
+    action = BTN_NOTIFY_UPDATE if had_prior else BTN_NOTIFY_ADD
     return (
         f"Категорії для сповіщення: <b>{', '.join(selected)}</b>\n\n"
-        "Натисни 🔔 Додати нотифікацію або обери ще."
+        f"Натисни {action} або обери ще."
     )
 
 

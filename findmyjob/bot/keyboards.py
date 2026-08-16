@@ -66,7 +66,7 @@ NOTIFY_FLOW = CategoryFlow(
     toggle=cb.CB_NOTIFY_TOGGLE,
     page=cb.CB_NOTIFY_PAGE,
     confirm=cb.CB_NOTIFY_CONFIRM,
-    confirm_label="🔔 Додати нотифікацію",
+    confirm_label=texts.BTN_NOTIFY_ADD,
     reset=cb.CB_NOTIFY_RESET,
     categories=DISPLAY_CATEGORIES,
     nda_locked_badge=False,
@@ -163,14 +163,16 @@ def build_persistent_keyboard(
 
 def build_category_keyboard(
     selected: list[str], page: int = 0, flow: CategoryFlow = SEARCH_FLOW,
-    is_admin: bool = False,
+    is_admin: bool = False, confirm_label: str | None = None,
 ) -> InlineKeyboardMarkup:
     """Клавіатура вибору категорій із пагінацією.
 
     Позначки (✅/⬜) зберігаються при переході між сторінками, бо стан вибору не
     залежить від поточної сторінки. `ADMIN_ONLY_CATEGORIES` показуються лише
     коли `is_admin=True` — решті користувачів ці категорії взагалі не
-    пропонуються для вибору.
+    пропонуються для вибору. `confirm_label` — перевизначає `flow.confirm_label`
+    (напр. "Оновити сповіщення" замість "Додати сповіщення", коли в юзера вже
+    була підписка).
     """
     categories = (
         flow.categories if is_admin
@@ -200,7 +202,8 @@ def build_category_keyboard(
             texts.BTN_RESET_CATEGORIES, callback_data=flow.reset,
         )])
         rows.append([InlineKeyboardButton(
-            f"{flow.confirm_label} ({len(selected)} обрано)",
+            f"{confirm_label if confirm_label is not None else flow.confirm_label} "
+            f"({len(selected)} обрано)",
             callback_data=flow.confirm,
         )])
     return InlineKeyboardMarkup(rows)

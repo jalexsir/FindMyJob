@@ -52,17 +52,19 @@ async def render_category_selection(
     status_text: Callable[[list[str]], str],
     flow: CategoryFlow = SEARCH_FLOW,
     is_admin: bool = False,
+    confirm_label: str | None = None,
 ) -> None:
     """Перемальовує повідомлення вибору категорій: текст стану + клавіатура.
 
     Спільне для пошуку й сповіщень — сценарії відрізняються лише функцією
     тексту (`texts.categories_status`/`notifications_status`) і флоу
-    клавіатури (`SEARCH_FLOW`/`NOTIFY_FLOW`).
+    клавіатури (`SEARCH_FLOW`/`NOTIFY_FLOW`). `confirm_label` — перевизначає
+    підпис кнопки підтвердження (див. `build_category_keyboard`).
     """
     await query.edit_message_text(
         status_text(selected),
         parse_mode=ParseMode.HTML,
-        reply_markup=build_category_keyboard(selected, page, flow, is_admin),
+        reply_markup=build_category_keyboard(selected, page, flow, is_admin, confirm_label),
     )
 
 
