@@ -23,6 +23,17 @@ from .base import HandlerGroup, render_category_selection
 
 logger = logging.getLogger(__name__)
 
+# Окремий логер (без %(name)s у форматі) — лише для запису про вибір категорій
+# пошуку: джерело й так видно з тегу [ПОШУК] у самому повідомленні. Не
+# зачіпає `logger` вище (лог нового користувача лишається зі стандартним
+# форматом). propagate=False — інакше рядок пішов би ще й через root-хендлер
+# і продублювався б у журналі зі стандартним форматом.
+search_logger = logging.getLogger(f"{__name__}.search")
+search_logger.propagate = False
+_search_handler = logging.StreamHandler()
+_search_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+search_logger.addHandler(_search_handler)
+
 
 class CategoryHandlers(HandlerGroup):
     """Вибір категорій — перший крок будь-якого сценарію."""
@@ -138,6 +149,12 @@ class CategoryHandlers(HandlerGroup):
             return
 
         await query.answer()
+
+        user = update.effective_user
+        search_logger.info(
+            "[ПОШУК] Користувач [%s] обрав категорії (%s) для пошуку",
+            user.id if user else None, ", ".join(selected),
+        )
 
         await query.edit_message_text(
             texts.categories_confirmed(selected), parse_mode=ParseMode.HTML
