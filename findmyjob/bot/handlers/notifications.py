@@ -25,7 +25,15 @@ from findmyjob.bot.keyboards import (
 
 from .base import HandlerGroup, render_category_selection
 
+# Власний хендлер/форматер без %(name)s: довгий шлях модуля тут зайвий, бо
+# джерело й так видно з тегу [СПОВІЩЕННЯ] у самому повідомленні.
+# propagate=False — інакше рядок пішов би ще й через root-хендлер (basicConfig
+# у bot.py) зі стандартним форматом, і в журналі він дублювався б двічі.
 logger = logging.getLogger(__name__)
+logger.propagate = False
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+logger.addHandler(_handler)
 
 
 class NotificationHandlers(HandlerGroup):
@@ -123,7 +131,7 @@ class NotificationHandlers(HandlerGroup):
         )
         user = update.effective_user
         logger.info(
-            "[СПОВІЩЕННЯ] Користувач %s обрав категорії %s для нотифікації",
+            "[СПОВІЩЕННЯ] Користувач [%s] обрав категорії (%s) для нотифікації",
             user.id if user else None, ", ".join(draft),
         )
         session.clear_notify_draft()
