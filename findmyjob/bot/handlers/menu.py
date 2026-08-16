@@ -46,8 +46,7 @@ class MenuHandlers(HandlerGroup):
         categories: CategoryHandlers,
         admin_user_id: int | None = None,
     ) -> None:
-        super().__init__(states)
-        self._admin_user_id = admin_user_id
+        super().__init__(states, admin_user_id)
         self._routes: dict[str, MenuAction] = {
             texts.BTN_VAC_1D: lambda u, c: vacancies.request_from_message(u, c, days=1),
             texts.BTN_VAC_7D: lambda u, c: vacancies.request_from_message(u, c, days=7),
@@ -103,11 +102,3 @@ class MenuHandlers(HandlerGroup):
             ),
         )
         self.session(update, context).track(message.message_id)
-
-    def _is_admin(self, update: Update) -> bool:
-        user = update.effective_user
-        return (
-            user is not None
-            and self._admin_user_id is not None
-            and user.id == self._admin_user_id
-        )

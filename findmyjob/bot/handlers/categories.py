@@ -27,8 +27,7 @@ class CategoryHandlers(HandlerGroup):
     """Вибір категорій — перший крок будь-якого сценарію."""
 
     def __init__(self, states: StateRepository, admin_user_id: int | None = None) -> None:
-        super().__init__(states)
-        self._admin_user_id = admin_user_id
+        super().__init__(states, admin_user_id)
 
     def handlers(self) -> Sequence[BaseHandler]:
         return (
@@ -76,7 +75,9 @@ class CategoryHandlers(HandlerGroup):
         """Кнопка «Продовжити» під інтро — показує вибір категорій."""
         query = update.callback_query
         await query.answer()
-        await self._render_selection(query, self.user_state(update, context).categories, 0)
+        await self._render_selection(
+            query, self.user_state(update, context).categories, 0, self._is_admin(update)
+        )
 
     async def toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -91,7 +92,9 @@ class CategoryHandlers(HandlerGroup):
 
         await query.answer()
         state.set_categories(selected)
-        await self._render_selection(query, selected, self.session(update, context).category_page)
+        await self._render_selection(
+            query, selected, self.session(update, context).category_page, self._is_admin(update)
+        )
 
     async def reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Знімає весь поточний вибір категорій одним натисканням."""
@@ -100,7 +103,9 @@ class CategoryHandlers(HandlerGroup):
 
         state = self.user_state(update, context)
         state.set_categories([])
-        await self._render_selection(query, [], self.session(update, context).category_page)
+        await self._render_selection(
+            query, [], self.session(update, context).category_page, self._is_admin(update)
+        )
 
     async def change_page(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Перехід між сторінками (◀️/▶️) — вибір категорій не зникає."""
@@ -109,7 +114,9 @@ class CategoryHandlers(HandlerGroup):
 
         page = int(cb.argument(query.data, cb.CB_CAT_PAGE))
         self.session(update, context).category_page = page
-        await self._render_selection(query, self.user_state(update, context).categories, page)
+        await self._render_selection(
+            query, self.user_state(update, context).categories, page, self._is_admin(update)
+        )
 
     async def noop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Кнопка-індикатор сторінки ("2/4") — просто нічого не робить."""
@@ -139,14 +146,6 @@ class CategoryHandlers(HandlerGroup):
         )
         self.session(update, context).track(message.message_id)
 
-    def _is_admin(self, update: Update) -> bool:
-        user = update.effective_user
-        return (
-            user is not None
-            and self._admin_user_id is not None
-            and user.id == self._admin_user_id
-        )
-
     async def reselect(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Повертає до вибору категорій зі збереженим поточним вибором."""
         query = update.callback_query
@@ -156,11 +155,15 @@ class CategoryHandlers(HandlerGroup):
         # При новому виборі категорій вакансії будуть перезавантажені
         session.clear_pending()
         session.category_page = 0
-        await self._render_selection(query, self.user_state(update, context).categories, 0)
+        await self._render_selection(
+            query, self.user_state(update, context).categories, 0, self._is_admin(update)
+        )
 
     @staticmethod
-    async def _render_selection(query, selected: list[str], page: int) -> None:
-        await render_category_selection(query, selected, page, texts.categories_status)
+    async def _render_selection(query, selected: list[str], page: int, is_admin: bool) -> None:
+        await render_category_selection(
+            query, selected, page, texts.categories_status, is_admin=is_admin
+        )
 
     async def reselect_from_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """"🔄 Переобрати категорії пошуку" з постійного меню (кнопка в
@@ -175,6 +178,6 @@ class CategoryHandlers(HandlerGroup):
         message = await update.message.reply_text(
             texts.categories_status(selected),
             parse_mode=ParseMode.HTML,
-            reply_markup=build_category_keyboard(selected, 0),
+            reply_markup=build_category_keyboard(selected, 0, is_admin=self._is_admin(update)),
         )
         session.track(message.message_id)

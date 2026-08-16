@@ -66,7 +66,7 @@ class NotificationHandlers(HandlerGroup):
         session = self.session(update, context)
         session.category_page = 0
         session.notify_draft = list(self.user_state(update, context).notification_categories)
-        await self._render(query, session.notify_draft, 0)
+        await self._render(query, session.notify_draft, 0, self._is_admin(update))
 
     async def toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """NDA-All тут — звичайна категорія в межах тієї ж квоти в 5, без
@@ -84,7 +84,7 @@ class NotificationHandlers(HandlerGroup):
 
         await query.answer()
         session.notify_draft = draft
-        await self._render(query, draft, session.category_page)
+        await self._render(query, draft, session.category_page, self._is_admin(update))
 
     async def reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Знімає весь поточний вибір (чернетку) одним натисканням."""
@@ -93,7 +93,7 @@ class NotificationHandlers(HandlerGroup):
 
         session = self.session(update, context)
         session.notify_draft = []
-        await self._render(query, [], session.category_page)
+        await self._render(query, [], session.category_page, self._is_admin(update))
 
     async def change_page(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -102,7 +102,7 @@ class NotificationHandlers(HandlerGroup):
         session = self.session(update, context)
         page = int(cb.argument(query.data, cb.CB_NOTIFY_PAGE))
         session.category_page = page
-        await self._render(query, session.notify_draft, page)
+        await self._render(query, session.notify_draft, page, self._is_admin(update))
 
     async def confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Зберігає підписку — тільки тут вона потрапляє в БД."""
@@ -157,5 +157,7 @@ class NotificationHandlers(HandlerGroup):
         )
 
     @staticmethod
-    async def _render(query, draft: list[str], page: int) -> None:
-        await render_category_selection(query, draft, page, texts.notifications_status, NOTIFY_FLOW)
+    async def _render(query, draft: list[str], page: int, is_admin: bool) -> None:
+        await render_category_selection(
+            query, draft, page, texts.notifications_status, NOTIFY_FLOW, is_admin
+        )
