@@ -139,14 +139,20 @@ def build_persistent_keyboard(
         ]
         if is_admin:
             top_row.append(KeyboardButton(texts.BTN_NDA_UPDATE_BASELINE))
-        bottom_row = [KeyboardButton(texts.BTN_RESELECT_CATS), KeyboardButton(texts.BTN_CLEAR)]
+        first_bottom_button = texts.BTN_RESELECT_CATS
     else:
         top_row = [
             KeyboardButton(texts.BTN_VAC_1D),
             KeyboardButton(texts.BTN_VAC_7D),
             KeyboardButton(texts.BTN_VAC_ALL),
         ]
-        bottom_row = [KeyboardButton(texts.BTN_CHOOSE_CATS), KeyboardButton(texts.BTN_CLEAR)]
+        first_bottom_button = texts.BTN_CHOOSE_CATS
+
+    # "ℹ️ Info" — лише в адміна, і завжди посередині нижнього ряду.
+    bottom_row = [KeyboardButton(first_bottom_button)]
+    if is_admin:
+        bottom_row.append(KeyboardButton(texts.BTN_INFO))
+    bottom_row.append(KeyboardButton(texts.BTN_CLEAR))
 
     return ReplyKeyboardMarkup(
         [
@@ -371,6 +377,20 @@ def build_reselect_keyboard() -> InlineKeyboardMarkup:
     """Єдина кнопка «Переобрати категорії пошуку»."""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(texts.BTN_RESELECT_CATS, callback_data=cb.CB_RESELECT_CATS)],
+    ])
+
+
+# URL-кнопки — не потребують callback_data/обробника, Telegram відкриває
+# посилання напряму (mailto: так само, як звичайний http(s)-лінк).
+INFO_MONOBANK_URL = "https://send.monobank.ua/jar/4dNpt2QUYJ"
+INFO_CONTACT_URL = "mailto:jalexsir@gmail.com"
+
+
+def build_info_keyboard() -> InlineKeyboardMarkup:
+    """"На каву" (монобанка) і контакт для фідбеку/багів — лише для адміна."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(texts.BTN_COFFEE, url=INFO_MONOBANK_URL)],
+        [InlineKeyboardButton(texts.BTN_CONTACT, url=INFO_CONTACT_URL)],
     ])
 
 
