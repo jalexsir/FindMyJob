@@ -380,17 +380,18 @@ def build_reselect_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-# URL-кнопки — не потребують callback_data/обробника, Telegram відкриває
-# посилання напряму (mailto: так само, як звичайний http(s)-лінк).
+# URL-кнопка не потребує callback_data/обробника, Telegram відкриває
+# посилання напряму. Контакт для фідбеку — НЕ кнопка: Bot API приймає в
+# InlineKeyboardButton.url лише http(s)/tg://, mailto: падає з
+# telegram.error.BadRequest("Button_url_invalid") — email лишається звичайним
+# текстом у MSG_INFO, Telegram сам підсвічує його як клікабельний.
 INFO_MONOBANK_URL = "https://send.monobank.ua/jar/4dNpt2QUYJ"
-INFO_CONTACT_URL = "mailto:jalexsir@gmail.com"
 
 
 def build_info_keyboard() -> InlineKeyboardMarkup:
-    """"На каву" (монобанка) і контакт для фідбеку/багів — лише для адміна."""
+    """"На каву" (монобанка) — лише для адміна. Контакт — текстом у MSG_INFO."""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(texts.BTN_COFFEE, url=INFO_MONOBANK_URL)],
-        [InlineKeyboardButton(texts.BTN_CONTACT, url=INFO_CONTACT_URL)],
     ])
 
 
