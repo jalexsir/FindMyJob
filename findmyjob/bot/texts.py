@@ -23,12 +23,16 @@ BTN_RESELECT_CATS = "🔄 Переобрати категорії пошуку"
 # але у звичайному (не nda_mode) нижньому ряду — окремий, коротший підпис,
 # бо тут це не "єдиний вихід" із режиму, а рядова дія поруч з очищенням.
 BTN_CHOOSE_CATS = "🔄 Обрати категорії"
+# Лише для адміна — build_persistent_keyboard(is_admin=True) додає її в
+# нижній ряд; MaintenanceHandlers.send_info() і сам перевіряє is_admin (про
+# всяк випадок — раптом хтось надішле текст кнопки вручну).
+BTN_INFO = "ℹ️ Info"
 
 ALL_BUTTON_TEXTS = (
     BTN_VAC_1D, BTN_VAC_7D, BTN_VAC_ALL,
     BTN_SHOW_HIDDEN, BTN_FAVORITES, BTN_NOTIFICATIONS, BTN_CLEAR,
     BTN_NDA_SHOW_NEW, BTN_NDA_SHOW_ALL, BTN_NDA_UPDATE_BASELINE, BTN_RESELECT_CATS,
-    BTN_CHOOSE_CATS,
+    BTN_CHOOSE_CATS, BTN_INFO,
 )
 
 # ── Підписи інлайн-кнопок ─────────────────────────────────────────────────────
@@ -52,6 +56,8 @@ BTN_NOTIFY_UPDATE = "🔔 Оновити сповіщення"
 BTN_YES = "✅ Так"
 BTN_NO = "❌ Ні"
 BTN_CONTINUE = "▶️ Продовжити"
+BTN_COFFEE = "☕ На каву"
+BTN_CONTACT = "✉️ Написати пропозицію або повідомити про проблему"
 
 # ── Повідомлення ──────────────────────────────────────────────────────────────
 MSG_INTRO = (
@@ -141,6 +147,7 @@ MSG_ABUSE_DETECTED_HTML = (
     "Забагато запитів за короткий час.\n"
     "Автоматично активовано захисний тайм-аут — <b>10 секунд</b>."
 )
+MSG_INFO = "ℹ️ Корисні посилання 👇"
 
 DEFAULT_VACANCY_TITLE = "вакансія"
 

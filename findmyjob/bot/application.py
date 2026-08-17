@@ -66,7 +66,7 @@ class BotApplication:
         hidden = HiddenHandlers(self._states, feeds, images)
         favorites = FavoriteHandlers(self._states, feeds, sender)
         notifications = NotificationHandlers(self._states, settings.admin_user_id)
-        maintenance = MaintenanceHandlers(self._states)
+        maintenance = MaintenanceHandlers(self._states, settings.admin_user_id)
         nda_actions = NdaActionHandlers(self._states, sender, settings.admin_user_id)
         categories = CategoryHandlers(self._states, settings.admin_user_id)
         self._notifier = NotificationDispatcher(self._states, feeds, sender)

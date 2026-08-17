@@ -11,7 +11,8 @@ from telegram.ext import BaseHandler, CallbackQueryHandler, ContextTypes
 from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
 from findmyjob.bot.keyboards import (
-    build_clear_confirm_keyboard, build_intro_continue_keyboard, build_reselect_keyboard,
+    build_clear_confirm_keyboard, build_info_keyboard, build_intro_continue_keyboard,
+    build_reselect_keyboard,
 )
 
 from .base import HandlerGroup
@@ -116,3 +117,14 @@ class MaintenanceHandlers(HandlerGroup):
         """Запам'ятовує будь-яке повідомлення користувача — щоб потім видалити."""
         if update.message:
             self.session(update, context).track(update.message.message_id)
+
+    async def send_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """"ℹ️ Info" з постійної клавіатури — лише для адміна (кнопка й так
+        не показується решті, це додатковий захист, якщо хтось надішле
+        точний текст кнопки вручну)."""
+        if not self._is_admin(update):
+            return
+        message = await update.message.reply_text(
+            texts.MSG_INFO, reply_markup=build_info_keyboard()
+        )
+        self.session(update, context).track(message.message_id)
