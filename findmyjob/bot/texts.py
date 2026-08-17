@@ -26,7 +26,7 @@ BTN_CHOOSE_CATS = "🔄 Обрати категорії"
 # Лише для адміна — build_persistent_keyboard(is_admin=True) додає її в
 # нижній ряд; MaintenanceHandlers.send_info() і сам перевіряє is_admin (про
 # всяк випадок — раптом хтось надішле текст кнопки вручну).
-BTN_INFO = "🛠 Інфо"
+BTN_INFO = "💡 Інфо"
 
 ALL_BUTTON_TEXTS = (
     BTN_VAC_1D, BTN_VAC_7D, BTN_VAC_ALL,

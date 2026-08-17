@@ -148,7 +148,7 @@ def build_persistent_keyboard(
         ]
         first_bottom_button = texts.BTN_CHOOSE_CATS
 
-    # "🧹 Очистити листування" — завжди посередині нижнього ряду; "🛠 Інфо"
+    # "🧹 Очистити листування" — завжди посередині нижнього ряду; "💡 Інфо"
     # (лише в адміна) — замикає ряд.
     bottom_row = [KeyboardButton(first_bottom_button), KeyboardButton(texts.BTN_CLEAR)]
     if is_admin:
