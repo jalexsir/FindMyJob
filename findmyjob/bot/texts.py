@@ -151,7 +151,8 @@ MSG_ABUSE_DETECTED_HTML = (
 # Telegram підсвічує як клікабельний.
 MSG_INFO = (
     "ℹ️ Корисні посилання 👇\n\n"
-    "✉️ Пропозиції та проблеми пиши на jalexsir@gmail.com"
+    "✉️ Пропозиції та проблеми пиши на jalexsir@gmail.com\n"
+    "☕ Якщо хочеш подякувати розробнику бота тапай «На каву»"
 )
 
 DEFAULT_VACANCY_TITLE = "вакансія"
