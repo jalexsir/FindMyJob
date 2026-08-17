@@ -119,7 +119,7 @@ class MaintenanceHandlers(HandlerGroup):
             self.session(update, context).track(update.message.message_id)
 
     async def send_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """"ℹ️ Info" з постійної клавіатури — лише для адміна (кнопка й так
+        """"🛠 Інфо" з постійної клавіатури — лише для адміна (кнопка й так
         не показується решті, це додатковий захист, якщо хтось надішле
         точний текст кнопки вручну)."""
         if not self._is_admin(update):
