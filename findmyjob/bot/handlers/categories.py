@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Sequence
+from zoneinfo import ZoneInfo
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -22,6 +23,12 @@ from findmyjob.feeds import NDA_CATEGORY
 from .base import HandlerGroup, render_category_selection
 
 logger = logging.getLogger(__name__)
+
+# Сервер живе в UTC (`%(asctime)s` теж пише UTC), тож без явної зони
+# вбудований у текст повідомлення час "приєднання" не збігався б із
+# фактичним київським часом — той самий підхід, що й у розкладі
+# сповіщень (application.py::NOTIFICATIONS_TIMEZONE).
+_KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
 # Окремий логер (без %(name)s у форматі) — лише для запису про вибір категорій
 # пошуку: джерело й так видно з тегу [ПОШУК] у самому повідомленні. Не
@@ -84,7 +91,7 @@ class CategoryHandlers(HandlerGroup):
         )
         logger.info(
             "[КОРИСТУВАЧІ] Новий користувач [%s] приєднався до чат боту (%s)",
-            user.id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            user.id, datetime.now(_KYIV_TZ).strftime("%Y-%m-%d %H:%M:%S"),
         )
 
     async def continue_intro(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
