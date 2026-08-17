@@ -386,12 +386,15 @@ def build_reselect_keyboard() -> InlineKeyboardMarkup:
 # telegram.error.BadRequest("Button_url_invalid") — email лишається звичайним
 # текстом у MSG_INFO, Telegram сам підсвічує його як клікабельний.
 INFO_MONOBANK_URL = "https://send.monobank.ua/jar/4dNpt2QUYJ"
+INFO_ARCHITECTURE_URL = "https://github.com/jalexsir/ReadMe/blob/main/ARCHITECTURE.md"
 
 
 def build_info_keyboard() -> InlineKeyboardMarkup:
-    """"На каву" (монобанка) — лише для адміна. Контакт — текстом у MSG_INFO."""
+    """"На каву" (монобанка) і посилання на технічний опис архітектури —
+    лише для адміна. Контакт — текстом у MSG_INFO."""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(texts.BTN_COFFEE, url=INFO_MONOBANK_URL)],
+        [InlineKeyboardButton(texts.BTN_ARCHITECTURE, url=INFO_ARCHITECTURE_URL)],
     ])
 
 
