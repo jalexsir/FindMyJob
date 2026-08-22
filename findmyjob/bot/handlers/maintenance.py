@@ -17,6 +17,9 @@ from findmyjob.bot.keyboards import (
 
 from .base import HandlerGroup
 
+# Ліміт Telegram Bot API для deleteMessages за один виклик.
+DELETE_CHUNK_SIZE = 100
+
 
 class MaintenanceHandlers(HandlerGroup):
     """Обслуговування чату: видалення історії та облік надісланих повідомлень."""
@@ -81,6 +84,12 @@ class MaintenanceHandlers(HandlerGroup):
         Нижня межа діапазону береться з `chat_state` у БД, тому очищення працює
         і після перезапуску бота — на відміну від попередньої версії, де перелік
         повідомлень жив лише в пам'яті процесу й губився при рестарті.
+
+        Видалення йде через `deleteMessages` (bulk, до 100 id за виклик), а не
+        по одному `delete_message` на повідомлення: по-перше, це на порядки
+        менше HTTP-запитів; по-друге, серія одиночних видалень в межах ОДНОГО
+        чату швидко впирається в per-chat flood control Telegram і кожен запит
+        починає займати секунди замість мілісекунд.
         """
         session = self.session(update, context)
         session.track(last_message_id)
@@ -90,12 +99,20 @@ class MaintenanceHandlers(HandlerGroup):
         start_message_id = session.start_message_id
         session.forget_tracked()
 
-        for message_id in range(first_message_id, last_message_id + 1):
-            if message_id == start_message_id:
-                continue
+        message_ids = [
+            message_id
+            for message_id in range(first_message_id, last_message_id + 1)
+            if message_id != start_message_id
+        ]
+
+        for chunk_start in range(0, len(message_ids), DELETE_CHUNK_SIZE):
+            chunk = message_ids[chunk_start : chunk_start + DELETE_CHUNK_SIZE]
             try:
-                await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+                await context.bot.delete_messages(chat_id=chat_id, message_ids=chunk)
             except Exception:
+                # Весь чанк може впасти, якщо, напр., усі id в ньому вже не
+                # існують. Точкового відновлення тут навмисно нема — той самий
+                # трейдоф, що й у попередній версії з try/except на кожен id.
                 pass
 
         # Скидаємо категорії й повертаємось до їх вибору
