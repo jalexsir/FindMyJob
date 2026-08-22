@@ -76,8 +76,7 @@ _TITLE_FILTER_WORDS_LOWER = tuple(word.lower() for word in _TITLE_FILTER_WORDS)
 # вони більше не пропускають вакансію. "ремонт" як підрядок ловить і
 # "ремонту" (та інші форми на кшталт "ремонтний"), тож окремо не додаємо.
 _TITLE_EXCLUDE_PHRASES = (
-    "Менеджер з роботи з клієнтами", "Event Manager", "Marketing",
-    "Recruitment", "Brand Manager", "Комунікаційний менеджер",
+    "Менеджер з роботи з клієнтами", "Event Manager", "Brand Manager", "Комунікаційний менеджер",
     "Monetization", "Staff", "ремонт",
 )
 _TITLE_EXCLUDE_PHRASES_LOWER = tuple(phrase.lower() for phrase in _TITLE_EXCLUDE_PHRASES)
