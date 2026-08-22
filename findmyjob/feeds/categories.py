@@ -23,6 +23,12 @@ AVAILABLE_CATEGORIES = [
     "Marketing", "Product Manager", "Project Manager",
     "QA", "SAP", "Security", "Analyst", "SysAdmin",
     "Technical Writer", "Unity", "Unreal Engine",
+    # Нові
+    "Account Manager", "Android", "Animator", "Artist", "Assistant",
+    "Big Data", "DBA", "Finance",
+    "HR", "iOS/macOS", "Legal", "Mobile",
+    "Procurement", "React Native", "Ruby", "Sales", "Salesforce",
+    "Scala", "Scrum Master", "SEO",
 ]
 
 DOU_CATEGORY_MAP = {
@@ -37,6 +43,16 @@ DOU_CATEGORY_MAP = {
     "Python": "Python", "QA": "QA", "Rust": "Rust", "SAP": "SAP", "Security": "Security",
     "Support": "Support", "SysAdmin": "SysAdmin", "Technical Writer": "Technical Writer",
     "Unity": "Unity", "Unreal Engine": "Unreal Engine",
+    # Нові
+    "Account Manager": "Account Manager", "Android": "Android", "Animator": "Animator",
+    "Artist": "Artist", "Assistant": "Assistant", "Big Data": "Big Data",
+    "DBA": "DBA", "Finance": "Finance",
+    "HR": "HR", "iOS/macOS": "iOS/macOS", "Legal": "Legal",
+    "Procurement": "Procurement", "React Native": "React Native", "Ruby": "Ruby",
+    "Sales": "Sales", "Salesforce": "Salesforce", "Scala": "Scala",
+    "Scrum Master": "Scrum Master", "SEO": "SEO",
+    # "Mobile" свідомо відсутній тут — немає відповідної DOU-категорії
+    # (Android/iOS йдуть окремо)
 }
 
 DJINNI_KEYWORD_MAP = {
@@ -51,6 +67,16 @@ DJINNI_KEYWORD_MAP = {
     "Python": "python", "QA": "qa", "Rust": "rust", "SAP": "sap", "Security": "security",
     "Support": "support", "SysAdmin": "sysadmin", "Technical Writer": "technical writer",
     "Unity": "unity", "Unreal Engine": "unreal engine",
+    # Нові — ключові слова НЕ перевірені емпірично на Djinni (на відміну від решти
+    # мапи), тож варто прогнати check_new_categories.py і подивитись на шум перед продом
+    "Account Manager": "account manager", "Android": "android", "Animator": "animator",
+    "Artist": "artist", "Assistant": "assistant", "Big Data": "big data",
+    "DBA": "dba", "Finance": "finance",
+    "HR": "hr", "iOS/macOS": "ios", "Legal": "legal",
+    "Mobile": "mobile",
+    "Procurement": "procurement", "React Native": "react native", "Ruby": "ruby",
+    "Sales": "sales", "Salesforce": "salesforce", "Scala": "scala",
+    "Scrum Master": "scrum master", "SEO": "seo",
 }
 
 
