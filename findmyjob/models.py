@@ -29,6 +29,18 @@ def make_link_hash(link: str) -> str:
     return hashlib.sha256(link.encode("utf-8")).hexdigest()[:16]
 
 
+def make_hidden_key(short_link: str, published: str, title: str) -> str:
+    """Ключ звірки з «прихованими»: хеш + дата + назва, склеєні як звичайні рядки.
+
+    Самого `short_link` мало: DOU і Djinni перепублікують вакансію під тим самим
+    URL, але з новою датою, тож стара прихована вакансія ховала б нову. Дата
+    порівнюється саме рядком (як вона збережена в `published`), без розбору в
+    `date`. Назва йде останньою, бо може містити будь-які символи, зокрема `|`;
+    `short_link` завжди має фіксовану довжину, тож склейка однозначна.
+    """
+    return f"{short_link}|{published}|{title}"
+
+
 def parse_published(published: str) -> date | None:
     """Розбирає рядок дати публікації (dd.mm.yyyy або RFC 2822)."""
     if not published or published == UNKNOWN_DATE:
@@ -66,6 +78,11 @@ class Vacancy:
     def short_link(self) -> str:
         """Короткий стабільний ID для callback_data."""
         return make_link_hash(self.link)
+
+    @property
+    def hidden_key(self) -> str:
+        """Ключ звірки з «прихованими»: `short_link|published|title`."""
+        return make_hidden_key(self.short_link, self.published, self.title)
 
     @property
     def identity_hash(self) -> str:

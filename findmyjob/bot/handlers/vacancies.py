@@ -15,9 +15,6 @@ from telegram.ext import BaseHandler, CallbackQueryHandler, ContextTypes
 from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
 from findmyjob.bot.formatting import build_summary
-from findmyjob.bot.hidden_diagnostics import (
-    log_hidden_check, log_hidden_check_done, log_hidden_check_start,
-)
 from findmyjob.bot.keyboards import (
     build_category_keyboard, build_confirm_show_keyboard, build_no_vacancies_keyboard,
     build_reselect_keyboard,
@@ -245,19 +242,19 @@ class VacancyHandlers(HandlerGroup):
         трапилися у фетчі: та сама вакансія може знайтися одразу в кількох
         категоріях (вони між собою не дедуплікуються), тож просте
         "було мінус стало" задвоювало б лічильник.
+
+        Що вважається прихованим — вирішує `UserState.is_hidden` (хеш + дата +
+        назва): перепублікована під тим самим URL вакансія з новою датою
+        не приховується.
         """
         hidden = state.hidden
         removed: set[str] = set()
         hidden_changed = False
 
-        found = sum(len(source.vacancies) for source in sources)
-        log_hidden_check_start("пошук", state.user_id, found, len(hidden))
-
         for source in sources:
             for vacancy in source.vacancies:
                 short_link = vacancy.short_link
-                log_hidden_check(vacancy, hidden)
-                if short_link not in hidden:
+                if not state.is_hidden(vacancy):
                     continue
                 removed.add(short_link)
                 # Самозцілення: вакансія могла бути прихована з іншої категорії
@@ -268,7 +265,7 @@ class VacancyHandlers(HandlerGroup):
                     categories.append(vacancy.category)
                     hidden_changed = True
 
-            kept = [v for v in source.vacancies if v.short_link not in hidden]
+            kept = [v for v in source.vacancies if not state.is_hidden(v)]
             # NDA-All — один спільний список без пагінації категорій, тож
             # ліміт "не більше N на джерело" (проти вибуху 1000+ карток при
             # 5 звичайних категоріях) тут не застосовний — показуємо все.
@@ -276,9 +273,6 @@ class VacancyHandlers(HandlerGroup):
 
         if hidden_changed:
             state.save_hidden()
-
-        available = sum(len(source.vacancies) for source in sources)
-        log_hidden_check_done("пошук", state.user_id, found, len(removed), available)
         return len(removed)
 
     # ── Завантаження зі звітом по джерелах ───────────────────────────────────

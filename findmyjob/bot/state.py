@@ -16,6 +16,7 @@ from typing import Any
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from findmyjob.models import Vacancy, make_hidden_key
 from findmyjob.storage import ChatAnchors, VacancyStore
 
 HIDDEN_KEY_PREFIX = "hidden_"
@@ -62,6 +63,26 @@ class UserState:
         if data is not None:
             self._bot_data[hidden_key(self._user_id)] = data
         self._store.replace_hidden(self._user_id, self.hidden)
+
+    def is_hidden(self, vacancy: Vacancy) -> bool:
+        """Чи прихована саме ця публікація вакансії.
+
+        Ключ запису — `short_link` (хеш URL), але його одного недостатньо: та сама
+        вакансія перепублікується під тим самим URL з новою датою. Тому порівнюємо
+        рядок «хеш + дата + назва» зі збереженого запису з таким самим рядком
+        знайденої вакансії; нова дата чи назва — вже не прихована.
+
+        Неповний запис (створений без кешу вакансії, див. `HiddenHandlers.hide`)
+        не має дати, а його назва береться з підпису повідомлення, тож для нього
+        лишається порівняння лише за хешем, як було раніше.
+        """
+        entry = self.hidden.get(vacancy.short_link)
+        if entry is None:
+            return False
+        published, title = entry.get("published"), entry.get("title")
+        if not published or not title:
+            return True
+        return make_hidden_key(vacancy.short_link, published, title) == vacancy.hidden_key
 
     def hidden_for_categories(self, categories: list[str]) -> dict[str, dict]:
         """Приховані лише обраних зараз категорій.
