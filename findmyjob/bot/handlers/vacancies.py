@@ -15,6 +15,9 @@ from telegram.ext import BaseHandler, CallbackQueryHandler, ContextTypes
 from findmyjob.bot import callbacks as cb
 from findmyjob.bot import texts
 from findmyjob.bot.formatting import build_summary
+from findmyjob.bot.hidden_diagnostics import (
+    log_hidden_check, log_hidden_check_done, log_hidden_check_start,
+)
 from findmyjob.bot.keyboards import (
     build_category_keyboard, build_confirm_show_keyboard, build_no_vacancies_keyboard,
     build_reselect_keyboard,
@@ -247,9 +250,13 @@ class VacancyHandlers(HandlerGroup):
         removed: set[str] = set()
         hidden_changed = False
 
+        found = sum(len(source.vacancies) for source in sources)
+        log_hidden_check_start("пошук", state.user_id, found, len(hidden))
+
         for source in sources:
             for vacancy in source.vacancies:
                 short_link = vacancy.short_link
+                log_hidden_check(vacancy, hidden)
                 if short_link not in hidden:
                     continue
                 removed.add(short_link)
@@ -269,6 +276,9 @@ class VacancyHandlers(HandlerGroup):
 
         if hidden_changed:
             state.save_hidden()
+
+        available = sum(len(source.vacancies) for source in sources)
+        log_hidden_check_done("пошук", state.user_id, found, len(removed), available)
         return len(removed)
 
     # ── Завантаження зі звітом по джерелах ───────────────────────────────────
