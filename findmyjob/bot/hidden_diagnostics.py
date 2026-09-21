@@ -43,12 +43,19 @@ def log_hidden_check_start(
     )
 
 
+def _stored(entry: Mapping[str, object], key: str) -> str:
+    """Поле запису з прихованих у виді `%r`; порожнє чи відсутнє — явно позначаємо."""
+    value = entry.get(key)
+    return repr(value) if value else "відсутнє"
+
+
 def log_hidden_check(
     vacancy: Vacancy, hidden: Mapping[str, dict], *, notifier: bool = False
 ) -> None:
     """Один рядок на вакансію: вердикт, поля вакансії та short_link із сирим link.
 
-    Для збігу додатково друкується `link` із запису в прихованих. `%r` замість
+    Для збігу додатково друкуються `title`, `published` і `link` із запису в
+    прихованих — щоб порівняти їх із полями знайденої вакансії. `%r` замість
     `%s` навмисно: він показує пробіли на краях, невидимі символи й параметри
     URL, які й ламають збіг хешів.
     """
@@ -61,10 +68,13 @@ def log_hidden_check(
 
     stored = ""
     if is_hidden:
-        stored_link = entry.get("link")
-        stored = f" | у прихованих: link={stored_link!r}" if stored_link else (
-            " | у прихованих: link відсутній (неповний запис)"
+        stored = (
+            f" | у прихованих: title={_stored(entry, 'title')}"
+            f" | published={_stored(entry, 'published')}"
+            f" | link={_stored(entry, 'link')}"
         )
+        if not entry.get("link"):
+            stored += " (неповний запис)"
 
     logger.info(
         "  %s | source=%r | category=%r | title=%r | company=%r | location=%r | "
