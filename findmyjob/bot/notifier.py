@@ -21,9 +21,6 @@ from datetime import date
 from telegram.ext import ContextTypes
 
 from findmyjob.bot import texts
-from findmyjob.bot.hidden_diagnostics import (
-    log_hidden_check, log_hidden_check_done, log_hidden_check_start,
-)
 from findmyjob.bot.keyboards import build_notification_footer_keyboard
 from findmyjob.bot.sending import VacancySender
 from findmyjob.bot.state import StateRepository
@@ -179,17 +176,11 @@ class NotificationDispatcher:
         per-user логу проходу.
         """
         state = self._states.user(context, sub.user_id)
-        hidden = state.hidden
         already_sent = self._states.store.sent_today(sub.user_id, today)
 
         matched: set[str] = set()
         hidden_count = 0
         picked: dict[str, dict] = {}
-        log_hidden_check_start(
-            "сповіщення", sub.user_id,
-            sum(len(by_category.get(category, ())) for category in sub.categories),
-            len(hidden), notifier=True,
-        )
         for category in sub.categories:
             for vacancy in by_category.get(category, ()):
                 short_link = vacancy.short_link
@@ -198,18 +189,13 @@ class NotificationDispatcher:
                 if short_link in matched:
                     continue
                 matched.add(short_link)
-                log_hidden_check(vacancy, hidden, notifier=True)
-                if short_link in hidden:
+                if state.is_hidden(vacancy):
                     hidden_count += 1
                     continue
                 if short_link in already_sent:
                     continue
                 picked[short_link] = vacancy.to_dict()
 
-        log_hidden_check_done(
-            "сповіщення", sub.user_id, len(matched), hidden_count, len(matched) - hidden_count,
-            notifier=True,
-        )
         return UserBatch(sub=sub, vacancies=picked), len(matched), hidden_count
 
     async def _deliver(
